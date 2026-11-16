@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { getPlatformProxy } from 'wrangler';
 import type { FioContract, LoanFetchResult } from '../src/sync/fio';
 import { extractLoan, pastGrace, planSync, type ExistingLoan, type FioLoan } from '../src/sync/plan';
 import { runSync } from '../src/sync/run';
+import { tempDatabase } from './helpers';
 
 const DAY = 86_400_000;
 const WEEK = 7 * DAY;
@@ -149,19 +146,9 @@ test('plan: manual rows are never changed, only verified when FIO agrees', () =>
 
 let db: D1Database;
 let dispose: () => Promise<void>;
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bureau-test-'));
 
 before(async () => {
-  const proxy = await getPlatformProxy<{ DB: D1Database }>({ persist: { path: tmp } });
-  db = proxy.env.DB;
-  dispose = proxy.dispose;
-  const schema = fs
-    .readFileSync('migrations/0001_init.sql', 'utf8')
-    .replace(/^\s*--.*$/gm, '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  await db.batch(schema.map((s) => db.prepare(s)));
+  ({ db, dispose } = await tempDatabase());
   await db.batch([
     db.prepare("INSERT INTO lenders (username, tracking_mode) VALUES ('Lena', 'fio'), ('Denied', 'fio'), ('Manual', 'manual')"),
     db.prepare("INSERT INTO borrowers (username, company_code) VALUES ('oldtimer', 'OLD')"),
@@ -174,10 +161,7 @@ before(async () => {
   ]);
 });
 
-after(async () => {
-  await dispose();
-  fs.rmSync(tmp, { recursive: true, force: true });
-});
+after(() => dispose());
 
 test('runSync writes loans, history, borrowers and sync results, and is idempotent', async () => {
   const companyLookups: string[] = [];
