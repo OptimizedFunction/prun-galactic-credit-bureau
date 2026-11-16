@@ -1,0 +1,311 @@
+// The editable ledger (spreadsheet-style) and the public list of recent changes.
+import { Hono } from 'hono';
+import ledgerScript from '../assets/ledger.client.js';
+import { currentUser } from './auth';
+import * as q from './db/queries';
+import { Layout } from './pages';
+import { STATUS_LABELS, type Status } from './lib/normalize';
+import type { Env } from './env';
+
+export const ledgerPages = new Hono<{ Bindings: Env }>();
+
+const LEDGER_CSS = `
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 12px 0; }
+.toolbar input[type=search] { flex: 1; min-width: 220px; padding: 8px 10px; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+#ledger-msg { min-height: 1.5em; font-weight: 600; }
+#ledger-msg.ok { color: var(--good); } #ledger-msg.err { color: var(--bad); }
+#ledger th { position: sticky; top: 0; background: var(--panel); z-index: 1; padding: 0; }
+#ledger th button { width: 100%; padding: 8px 12px; font: inherit; font-weight: 600; font-size: 13px; color: var(--muted); background: none; border: 0; text-align: inherit; cursor: pointer; }
+#ledger th[aria-sort=ascending] button::after { content: " ▲"; } #ledger th[aria-sort=descending] button::after { content: " ▼"; }
+#ledger td { padding: 5px 12px; }
+#ledger td[tabindex] { cursor: cell; }
+#ledger td[tabindex]:hover, #ledger td[tabindex]:focus { outline: 2px solid var(--link); outline-offset: -2px; }
+#ledger td.locked { color: var(--muted); }
+#ledger td input:not([type=checkbox]), #ledger td select { width: 100%; min-width: 90px; padding: 3px 6px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--link); border-radius: 4px; }
+#ledger td.wrap { min-width: 260px; }
+#ledger td.st-breached { color: var(--bad); font-weight: 600; } #ledger td.st-complete { color: var(--good); } #ledger td.st-overdue, #ledger td.st-stale { color: var(--warn); }
+.row-actions button, .undo { padding: 2px 8px; font: inherit; font-size: 13px; color: var(--bad); background: none; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+.undo { color: var(--link); }
+.ledger-scroll { max-height: calc(100vh - 150px); overflow: auto; }
+form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; align-items: end; }
+form.add label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+form.add input, form.add select { padding: 7px 8px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+form.add button { padding: 8px 14px; font: inherit; font-weight: 600; color: #fff; background: #1558b0; border: 0; border-radius: 6px; cursor: pointer; }
+details.panel summary { cursor: pointer; font-weight: 600; }
+details.panel[open] summary { margin-bottom: 12px; }
+`;
+
+ledgerPages.get('/ledger.js', (c) => c.body(ledgerScript, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
+
+ledgerPages.get('/ledger', async (c) => {
+  const [user, { loans }] = await Promise.all([currentUser(c), q.listLoans(c.env.DB, { limit: 100_000, offset: 0 })]);
+  const data = {
+    user,
+    loans: loans.map((l) => ({
+      id: l.id,
+      lender: l.lender,
+      borrower: l.borrower.username,
+      companyCode: l.borrower.companyCode,
+      corpCode: l.borrower.corpCode,
+      principal: l.principal,
+      currency: l.currency,
+      issuedOn: l.issuedOn,
+      durationWeeks: l.durationWeeks,
+      status: l.status,
+      contractId: l.contractId,
+      autoTrack: l.autoTrack,
+      notes: l.notes,
+    })),
+  };
+  // "<" is escaped so loan text can never close the script element.
+  const embedded = JSON.stringify(data).replace(/</g, '\\u003c');
+  c.header('Cache-Control', 'no-store');
+
+  return c.html(
+    <Layout title="Ledger" wide>
+      <style dangerouslySetInnerHTML={{ __html: LEDGER_CSS }} />
+      <h1>Ledger</h1>
+      <p class="sub">
+        Every loan in the bureau.{' '}
+        {user ? (
+          <>Click a cell to edit it; Enter saves, Esc cancels, Tab moves on. Every change is public in <a href="/changes">Recent changes</a>.</>
+        ) : (
+          <>
+            <a href="/auth/login?return=/ledger">Sign in with Discord</a> to edit.
+          </>
+        )}{' '}
+        Loans with Auto track ticked are kept up to date from FIO: only their Notes can be edited unless you untick it.
+      </p>
+      {user && (
+        <details class="panel">
+          <summary>Add a loan</summary>
+          <form class="add" id="ledger-add">
+            <label>
+              Lender
+              <input name="lender" required maxlength={64} />
+            </label>
+            <label>
+              Borrower
+              <input name="borrower" required maxlength={64} />
+            </label>
+            <label>
+              CO
+              <input name="companyCode" maxlength={8} />
+            </label>
+            <label>
+              CORP
+              <input name="corpCode" maxlength={8} />
+            </label>
+            <label>
+              Amount
+              <input name="principal" required inputmode="decimal" placeholder="25,000,000" />
+            </label>
+            <label>
+              Currency
+              <select name="currency">
+                <option>AIC</option>
+                <option>CIS</option>
+                <option>ICA</option>
+                <option>NCC</option>
+                <option value="">N/A</option>
+              </select>
+            </label>
+            <label>
+              Issued
+              <input name="issuedOn" type="date" required />
+            </label>
+            <label>
+              Weeks
+              <input name="durationWeeks" inputmode="decimal" />
+            </label>
+            <label>
+              Status
+              <select name="status">
+                {(Object.keys(STATUS_LABELS) as Status[]).map((s) => (
+                  <option value={s}>{STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Contract ID
+              <input name="contractId" maxlength={16} />
+            </label>
+            <label>
+              Notes
+              <input name="notes" maxlength={2000} />
+            </label>
+            <button type="submit">Add loan</button>
+          </form>
+        </details>
+      )}
+      <div class="toolbar">
+        <input type="search" id="ledger-filter" placeholder="Filter: any text, e.g. a username, contract ID or status" aria-label="Filter loans" />
+        <span id="ledger-count" class="muted"></span>
+        <span id="ledger-msg" role="status"></span>
+      </div>
+      <div class="scroll ledger-scroll">
+        <table id="ledger">
+          <thead>
+            <tr></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <noscript>
+        <p>The ledger needs JavaScript. Without it, use the borrower and lender pages.</p>
+      </noscript>
+      <script type="application/json" id="ledger-data" dangerouslySetInnerHTML={{ __html: embedded }} />
+      <script src="/ledger.js" defer></script>
+    </Layout>,
+  );
+});
+
+const FIELD_LABELS: Record<string, string> = {
+  lender: 'Lender',
+  borrower: 'Borrower',
+  companyCode: 'CO',
+  corpCode: 'CORP',
+  principal: 'Amount',
+  currency: 'Currency',
+  issuedOn: 'Issued',
+  durationWeeks: 'Weeks',
+  status: 'Status',
+  contractId: 'Contract',
+  autoTrack: 'Auto track',
+  notes: 'Notes',
+  trust: 'Trust',
+  deleted: 'Deleted',
+};
+
+const show = (field: string, value: unknown): string => {
+  if (value === null || value === undefined || value === '') return 'blank';
+  if (field === 'status' && typeof value === 'string' && value in STATUS_LABELS) return STATUS_LABELS[value as Status];
+  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  return String(value);
+};
+
+/** The request that reverses a change, or null if it cannot be undone from here. */
+function undoRequest(change: q.Change): { method: string; url: string; body?: unknown } | null {
+  if (change.actorType !== 'user') return null;
+  const url = `/api/v1/loans/${change.loanId}`;
+  const before = (change.before ?? {}) as Record<string, unknown>;
+  if (change.action === 'delete') return change.loanDeleted ? { method: 'POST', url: `${url}/restore` } : null;
+  if (change.loanDeleted) return null;
+  if (change.action === 'create') return change.loanTracked ? null : { method: 'DELETE', url };
+  if (change.action === 'update') {
+    if ('deleted' in before) return change.loanTracked ? null : { method: 'DELETE', url };
+    return { method: 'PATCH', url, body: before };
+  }
+  return null;
+}
+
+const UNDO_SCRIPT = `
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button.undo');
+  if (!btn) return;
+  const req = JSON.parse(btn.dataset.req);
+  btn.disabled = true;
+  const res = await fetch(req.url, { method: req.method, headers: req.body ? { 'Content-Type': 'application/json' } : {}, body: req.body ? JSON.stringify(req.body) : undefined }).catch(() => null);
+  if (res && res.ok) return location.reload();
+  const data = res ? await res.json().catch(() => ({})) : {};
+  alert(data.error?.message ?? 'Could not undo this change.');
+  btn.disabled = false;
+});`;
+
+ledgerPages.get('/changes', async (c) => {
+  const includeSystem = c.req.query('system') === '1';
+  const page = Math.max(1, Number(c.req.query('page')) || 1);
+  const size = 100;
+  const [user, changes] = await Promise.all([
+    currentUser(c),
+    q.listChanges(c.env.DB, { includeSystem, limit: size + 1, offset: (page - 1) * size }),
+  ]);
+  const more = changes.length > size;
+  const link = (p: number) => `/changes?page=${p}${includeSystem ? '&system=1' : ''}`;
+  c.header('Cache-Control', 'no-store');
+
+  return c.html(
+    <Layout title="Recent changes">
+      <style dangerouslySetInnerHTML={{ __html: LEDGER_CSS }} />
+      <h1>Recent changes</h1>
+      <p class="sub">
+        Every edit made on this site, newest first.{' '}
+        {includeSystem ? <a href="/changes">Hide automatic changes</a> : <a href="/changes?system=1">Include automatic changes from the FIO sync</a>}.
+        {!user && (
+          <>
+            {' '}
+            <a href="/auth/login?return=/changes">Sign in with Discord</a> to undo a change.
+          </>
+        )}
+      </p>
+      {changes.length === 0 ? (
+        <p class="muted">No changes yet.</p>
+      ) : (
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>When (UTC)</th>
+                <th>Who</th>
+                <th>Loan</th>
+                <th>Change</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {changes.slice(0, size).map((ch) => {
+                const before = (ch.before ?? {}) as Record<string, unknown>;
+                const after = (ch.after ?? {}) as Record<string, unknown>;
+                const undo = user ? undoRequest(ch) : null;
+                return (
+                  <tr>
+                    <td>
+                      {ch.createdAt.slice(0, 10)} {ch.createdAt.slice(11, 16)}
+                    </td>
+                    <td>{ch.actorType === 'user' ? ch.actor : <span class="muted">{ch.actor}</span>}</td>
+                    <td>
+                      <a href={`/loans/${ch.loanId}`}>
+                        {ch.lender} → {ch.borrower}
+                      </a>
+                      {ch.contractId && <span class="muted"> {ch.contractId}</span>}
+                      {ch.loanDeleted && <span class="badge bad" style="margin-left:6px">deleted</span>}
+                    </td>
+                    <td class="wrap">
+                      {ch.action === 'create' && (
+                        <>
+                          Added: {show('principal', after['principal'])} {show('currency', after['currency'])}, {show('status', after['status'])}
+                        </>
+                      )}
+                      {ch.action === 'delete' && <>Deleted the loan</>}
+                      {ch.action === 'update' &&
+                        ('deleted' in after ? (
+                          <>Restored the loan</>
+                        ) : (
+                          Object.keys(after).map((field) => (
+                            <div>
+                              {FIELD_LABELS[field] ?? field}: {show(field, before[field])} → <strong>{show(field, after[field])}</strong>
+                            </div>
+                          ))
+                        ))}
+                    </td>
+                    <td>
+                      {undo && (
+                        <button type="button" class="undo" data-req={JSON.stringify(undo)}>
+                          {undo.method === 'POST' ? 'Restore' : 'Undo'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p>
+        {page > 1 && <a href={link(page - 1)}>← Newer</a>} {more && <a href={link(page + 1)}>Older →</a>}
+      </p>
+      <script dangerouslySetInnerHTML={{ __html: UNDO_SCRIPT }} />
+    </Layout>,
+  );
+});

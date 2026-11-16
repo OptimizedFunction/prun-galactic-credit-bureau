@@ -30,6 +30,7 @@ header.site .inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8
 header.site .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); margin-right: auto; }
 header.site nav { display: flex; flex-wrap: wrap; gap: 16px; }
 main { padding-top: 24px; padding-bottom: 40px; }
+main.wide { max-width: none; }
 footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
 h1 { font-size: 26px; margin: 0 0 4px; overflow-wrap: anywhere; }
 h2 { font-size: 18px; margin: 32px 0 10px; }
@@ -63,7 +64,9 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 `;
 
-const Layout = (props: { title: string; children?: Child }) => html`<!doctype html>${(
+const AUTH_SCRIPT = "fetch('/auth/me').then(function(r){return r.json()}).then(function(d){var el=document.getElementById('auth');if(!el)return;if(d.user){var out=document.createElement('a');out.href='#';out.textContent='Sign out';out.onclick=function(e){e.preventDefault();fetch('/auth/logout',{method:'POST'}).then(function(){location.reload()})};el.append(d.user.name+' · ',out)}else if(d.signInAvailable){var a=document.createElement('a');a.href='/auth/login?return='+encodeURIComponent(location.pathname+location.search);a.textContent='Sign in with Discord';el.append(a)}}).catch(function(){});";
+
+export const Layout = (props: { title: string; wide?: boolean; children?: Child }) => html`<!doctype html>${(
   <html lang="en">
     <head>
       <meta charset="utf-8" />
@@ -80,15 +83,19 @@ const Layout = (props: { title: string; children?: Child }) => html`<!doctype ht
             PrUn Galactic Credit Bureau
           </a>
           <nav>
+            <a href="/ledger">Ledger</a>
             <a href="/lenders">Lenders</a>
             <a href="/leaderboards">Leaderboards</a>
             <a href="/sync">Sync health</a>
+            <a href="/changes">Changes</a>
             <a href="/about">About</a>
+            <span id="auth" class="muted"></span>
           </nav>
         </div>
       </header>
-      <main>{props.children}</main>
+      <main class={props.wide ? 'wide' : undefined}>{props.children}</main>
       <footer>Public data about lending in Prosperous Universe. Amounts are in-game currency and are never added across currencies.</footer>
+      <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
     </body>
   </html>
 )}`;
@@ -464,6 +471,12 @@ pages.get('/loans/:id', async (c) => {
           <dd>{loan.contractId ?? 'None recorded'}</dd>
           <dt>Trust</dt>
           <dd>{TRUST_LABELS[loan.trust]}</dd>
+          {loan.deletedAt && (
+            <>
+              <dt>Deleted</dt>
+              <dd>This loan was deleted on {loan.deletedAt.slice(0, 10)} and is left out of lists and totals. It can be restored from <a href="/changes">Recent changes</a>.</dd>
+            </>
+          )}
           <dt>Tracking</dt>
           <dd>{loan.autoTrack ? `Automatic${loan.lastSyncedAt ? `, last checked ${stamp(loan.lastSyncedAt)}` : ''}` : 'Manual entry'}</dd>
           {loan.everBreached && loan.status !== 'breached' && (
@@ -480,6 +493,9 @@ pages.get('/loans/:id', async (c) => {
           )}
         </dl>
       </div>
+      <p>
+        <a href={`/ledger?q=${encodeURIComponent(loan.contractId ?? loan.borrower.username)}`}>Edit in the ledger</a>
+      </p>
       <h2>Status history</h2>
       {history.length === 0 ? (
         <p class="muted">No status changes recorded yet.</p>
@@ -523,9 +539,9 @@ pages.get('/loans/:id', async (c) => {
               <tr>
                 <td>{day(r.createdAt)}</td>
                 <td>{r.actor}</td>
-                <td>{r.action === 'import' ? 'Imported from the sheet' : r.action}</td>
+                <td>{r.action === 'import' ? 'Imported from the sheet' : r.action === 'create' ? 'Added' : r.action === 'delete' ? 'Deleted' : 'Changed'}</td>
                 <td class="wrap">
-                  <pre>{JSON.stringify(r.after, null, 1)}</pre>
+                  <pre>{JSON.stringify(r.after ?? r.before, null, 1)}</pre>
                 </td>
               </tr>
             ))}
@@ -662,6 +678,12 @@ pages.get('/about', (c) =>
           <dt>Community-edited</dt>
           <dd>Entered or changed by someone else. See the loan's version history.</dd>
         </dl>
+        <h2>Editing</h2>
+        <p>
+          Anyone who signs in with Discord can add, edit and delete loans in the <a href="/ledger">ledger</a>. Every change is listed with who made
+          it in <a href="/changes">Recent changes</a> and can be undone there. Loans with Auto track ticked follow FIO, so only their notes can be
+          edited.
+        </p>
         <h2>API</h2>
         <p>
           Everything on this site is available as JSON under <a href="/api/v1/stats">/api/v1</a>, with no key needed. For example{' '}
