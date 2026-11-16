@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/normalize.test.ts test/sync.test.ts",
     "dev:cron": "wrangler dev --test-scheduled",
-    "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate"
+    "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate",
+    "sync:dry": "tsx scripts/sync-dry-run.ts"
   },
   "dependencies": {
     "hono": "^4.13.19"

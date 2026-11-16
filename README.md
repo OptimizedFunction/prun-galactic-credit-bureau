@@ -18,7 +18,7 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | Database schema | Done |
 | Import of the existing sheet, checked against its Summary tab | Done |
 | Read API (`/api/v1`) and public pages | Done |
-| Automatic sync from FIO | Written and tested against fake FIO data; not yet run against live FIO |
+| Automatic sync from FIO | Done; run against live FIO locally |
 | Lender API keys, reporting, public editing, Discord sign-in | Not started |
 | Deployment | Not started (runs locally only) |
 
@@ -49,6 +49,8 @@ local database; stop `npm run dev` first).
 The sync runs hourly as a cron trigger and does nothing unless `FIO_API_KEY` is set. To run it locally, put
 the key in `.dev.vars`, start `npm run dev:cron`, and open `http://localhost:8787/__scheduled`. Results show
 on the Sync health page.
+
+`npm run sync:dry` fetches from live FIO and prints what the sync would change, without writing anything.
 
 To import a copy of the sheet instead, set `SHEET_ID` (and `SHEET_GIDS` if the tab IDs differ, e.g.
 `{"status-history":123,"lender-sync":456}`).
