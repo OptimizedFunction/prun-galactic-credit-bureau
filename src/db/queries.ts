@@ -24,6 +24,8 @@ export interface Loan {
   autoTrack: boolean;
   lastSyncedAt: string | null;
   updatedAt: string;
+  /** Set when the loan has been deleted (hidden from lists and totals). */
+  deletedAt: string | null;
 }
 
 interface LoanRow {
@@ -47,13 +49,14 @@ interface LoanRow {
   auto_track: number;
   last_synced_at: string | null;
   updated_at: string;
+  deleted_at: string | null;
 }
 
 const LOAN_SELECT = `
   SELECT l.id, l.contract_id, le.username AS lender, b.username AS borrower,
          l.borrower_company_code, l.borrower_corp_code, l.principal_minor, l.currency, l.issued_on,
          l.duration_weeks, l.loan_type, l.status, l.outstanding_minor, l.notes, l.trust, l.source,
-         l.auto_track, l.last_synced_at, l.updated_at,
+         l.auto_track, l.last_synced_at, l.updated_at, l.deleted_at,
          (l.status = 'breached' OR EXISTS (
             SELECT 1 FROM loan_status_history h WHERE h.loan_id = l.id AND h.new_status = 'breached'
          )) AS ever_breached
@@ -83,6 +86,7 @@ function toLoan(r: LoanRow): Loan {
     autoTrack: r.auto_track === 1,
     lastSyncedAt: r.last_synced_at,
     updatedAt: r.updated_at,
+    deletedAt: r.deleted_at,
   };
 }
 
@@ -97,14 +101,14 @@ export interface LoanFilter {
 }
 
 export async function listLoans(db: D1Database, f: LoanFilter): Promise<{ loans: Loan[]; total: number }> {
-  const where: string[] = [];
+  const where: string[] = ['l.deleted_at IS NULL'];
   const args: (string | number)[] = [];
   if (f.lender) (where.push('le.username = ?'), args.push(f.lender));
   if (f.borrower) (where.push('b.username = ?'), args.push(f.borrower));
   if (f.contractId) (where.push('l.contract_id = ?'), args.push(f.contractId));
   if (f.status) (where.push('l.status = ?'), args.push(f.status));
   if (f.currency) (where.push('l.currency = ?'), args.push(f.currency));
-  const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+  const clause = `WHERE ${where.join(' AND ')}`;
 
   const [rows, count] = await db.batch<LoanRow | { n: number }>([
     db.prepare(`${LOAN_SELECT} ${clause} ORDER BY l.issued_on DESC, l.id DESC LIMIT ? OFFSET ?`).bind(...args, f.limit, f.offset),
@@ -143,6 +147,7 @@ export interface Revision {
   action: string;
   actorType: string;
   actor: string;
+  actorId: string | null;
   before: unknown;
   after: unknown;
   createdAt: string;
@@ -151,15 +156,16 @@ export interface Revision {
 export async function getRevisions(db: D1Database, entityType: 'loan' | 'lender' | 'borrower', entityId: number): Promise<Revision[]> {
   const { results } = await db
     .prepare(
-      'SELECT id, action, actor_type, actor, before_json, after_json, created_at FROM revisions WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC, id DESC',
+      'SELECT id, action, actor_type, actor, actor_id, before_json, after_json, created_at FROM revisions WHERE entity_type = ? AND entity_id = ? ORDER BY created_at DESC, id DESC',
     )
     .bind(entityType, entityId)
-    .all<{ id: number; action: string; actor_type: string; actor: string; before_json: string | null; after_json: string | null; created_at: string }>();
+    .all<{ id: number; action: string; actor_type: string; actor: string; actor_id: string | null; before_json: string | null; after_json: string | null; created_at: string }>();
   return results.map((r) => ({
     id: r.id,
     action: r.action,
     actorType: r.actor_type,
     actor: r.actor,
+    actorId: r.actor_id,
     before: r.before_json ? JSON.parse(r.before_json) : null,
     after: r.after_json ? JSON.parse(r.after_json) : null,
     createdAt: r.created_at,
@@ -251,7 +257,7 @@ export async function getBorrower(db: D1Database, username: string): Promise<Bor
 
 export async function getBorrowerExposure(db: D1Database, borrowerId: number): Promise<Exposure[]> {
   const { results } = await db
-    .prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.borrower_id = ? GROUP BY l.currency ORDER BY l.currency`)
+    .prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.borrower_id = ? AND l.deleted_at IS NULL GROUP BY l.currency ORDER BY l.currency`)
     .bind(borrowerId)
     .all<ExposureRow>();
   return results.map(toExposure);
@@ -274,7 +280,7 @@ export async function getLender(db: D1Database, username: string): Promise<Lende
 
 export async function getLenderExposure(db: D1Database, lenderId: number): Promise<Exposure[]> {
   const { results } = await db
-    .prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.lender_id = ? GROUP BY l.currency ORDER BY l.currency`)
+    .prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.lender_id = ? AND l.deleted_at IS NULL GROUP BY l.currency ORDER BY l.currency`)
     .bind(lenderId)
     .all<ExposureRow>();
   return results.map(toExposure);
@@ -292,7 +298,7 @@ export interface LenderSummary {
 export async function listLenders(db: D1Database): Promise<LenderSummary[]> {
   const [lenders, exposure] = await db.batch<{ id: number; username: string; tracking_mode: Lender['trackingMode'] } | (ExposureRow & { lender_id: number })>([
     db.prepare('SELECT id, username, tracking_mode FROM lenders ORDER BY username'),
-    db.prepare(`SELECT l.lender_id, ${EXPOSURE_COLUMNS} FROM loans l WHERE l.currency IS NOT NULL GROUP BY l.lender_id, l.currency ORDER BY l.currency`),
+    db.prepare(`SELECT l.lender_id, ${EXPOSURE_COLUMNS} FROM loans l WHERE l.currency IS NOT NULL AND l.deleted_at IS NULL GROUP BY l.lender_id, l.currency ORDER BY l.currency`),
   ]);
   const byLender = new Map<number, Exposure[]>();
   for (const row of exposure!.results as (ExposureRow & { lender_id: number })[]) {
@@ -347,7 +353,7 @@ export async function search(db: D1Database, q: string, limit = 25): Promise<Sea
   const [borrowers, lenders] = await db.batch<{ username: string; company_code?: string | null; corp_code?: string | null; loans: number }>([
     db
       .prepare(
-        `SELECT b.username, b.company_code, b.corp_code, (SELECT COUNT(*) FROM loans l WHERE l.borrower_id = b.id) AS loans
+        `SELECT b.username, b.company_code, b.corp_code, (SELECT COUNT(*) FROM loans l WHERE l.borrower_id = b.id AND l.deleted_at IS NULL) AS loans
          FROM borrowers b
          WHERE b.username LIKE ?1 ESCAPE '\\'
             OR b.company_code = ?2
@@ -359,7 +365,7 @@ export async function search(db: D1Database, q: string, limit = 25): Promise<Sea
       .bind(like, q, limit),
     db
       .prepare(
-        `SELECT le.username, (SELECT COUNT(*) FROM loans l WHERE l.lender_id = le.id) AS loans
+        `SELECT le.username, (SELECT COUNT(*) FROM loans l WHERE l.lender_id = le.id AND l.deleted_at IS NULL) AS loans
          FROM lenders le WHERE le.username LIKE ?1 ESCAPE '\\'
          ORDER BY (le.username = ?2) DESC, le.username LIMIT ?3`,
       )
@@ -412,12 +418,54 @@ export interface Totals {
 export async function getTotals(db: D1Database): Promise<Totals> {
   const [counts, exposure] = await db.batch<{ loans: number; lenders: number; borrowers: number } | ExposureRow>([
     db.prepare(
-      `SELECT (SELECT COUNT(*) FROM loans) AS loans,
-              (SELECT COUNT(DISTINCT lender_id) FROM loans) AS lenders,
+      `SELECT (SELECT COUNT(*) FROM loans WHERE deleted_at IS NULL) AS loans,
+              (SELECT COUNT(DISTINCT lender_id) FROM loans WHERE deleted_at IS NULL) AS lenders,
               (SELECT COUNT(*) FROM borrowers) AS borrowers`,
     ),
-    db.prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.currency IS NOT NULL GROUP BY l.currency ORDER BY l.currency`),
+    db.prepare(`SELECT ${EXPOSURE_COLUMNS} FROM loans l WHERE l.currency IS NOT NULL AND l.deleted_at IS NULL GROUP BY l.currency ORDER BY l.currency`),
   ]);
   const c = counts!.results[0] as { loans: number; lenders: number; borrowers: number };
   return { ...c, exposure: (exposure!.results as ExposureRow[]).map(toExposure) };
+}
+
+export interface Change extends Revision {
+  loanId: number;
+  contractId: string | null;
+  lender: string;
+  borrower: string;
+  loanDeleted: boolean;
+  loanTracked: boolean;
+}
+
+/** Recent changes to loans, newest first. Sheet-import rows are left out; system (sync) changes are optional. */
+export async function listChanges(db: D1Database, opts: { includeSystem: boolean; limit: number; offset: number }): Promise<Change[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT r.id, r.entity_id, r.action, r.actor_type, r.actor, r.actor_id, r.before_json, r.after_json, r.created_at,
+              l.contract_id, le.username AS lender, b.username AS borrower, l.deleted_at, l.auto_track
+       FROM revisions r
+       JOIN loans l ON l.id = r.entity_id
+       JOIN lenders le ON le.id = l.lender_id
+       JOIN borrowers b ON b.id = l.borrower_id
+       WHERE r.entity_type = 'loan' AND r.action <> 'import' AND (?1 = 1 OR r.actor_type = 'user')
+       ORDER BY r.id DESC LIMIT ?2 OFFSET ?3`,
+    )
+    .bind(opts.includeSystem ? 1 : 0, opts.limit, opts.offset)
+    .all<{ id: number; entity_id: number; action: string; actor_type: string; actor: string; actor_id: string | null; before_json: string | null; after_json: string | null; created_at: string; contract_id: string | null; lender: string; borrower: string; deleted_at: string | null; auto_track: number }>();
+  return results.map((r) => ({
+    id: r.id,
+    action: r.action,
+    actorType: r.actor_type,
+    actor: r.actor,
+    actorId: r.actor_id,
+    before: r.before_json ? JSON.parse(r.before_json) : null,
+    after: r.after_json ? JSON.parse(r.after_json) : null,
+    createdAt: r.created_at,
+    loanId: r.entity_id,
+    contractId: r.contract_id,
+    lender: r.lender,
+    borrower: r.borrower,
+    loanDeleted: r.deleted_at !== null,
+    loanTracked: r.auto_track === 1,
+  }));
 }
