@@ -9,6 +9,7 @@
     "dev": "wrangler dev",
     "db:migrate": "wrangler d1 migrations apply bureau --local",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/normalize.test.ts",
     "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate"
   },
   "dependencies": {
