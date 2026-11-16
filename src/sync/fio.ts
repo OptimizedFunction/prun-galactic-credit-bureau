@@ -93,3 +93,15 @@ export async function fetchCompanyByName(apiKey: string, companyName: string, fe
     return null;
   }
 }
+
+/**
+ * Asks FIO whose key this is. Returns the account's username (FIO gives it in upper case),
+ * null if FIO rejects the key, and throws if FIO cannot be reached.
+ */
+export async function fetchKeyOwner(apiKey: string, fetcher: typeof fetch = fetch): Promise<string | null> {
+  const res = await fetcher(`${FIO_BASE}/auth`, { headers: { Authorization: apiKey }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (res.status === 401) return null;
+  if (res.status !== 200) throw new Error(`FIO answered HTTP ${res.status}`);
+  const name = (await res.text()).trim();
+  return name === '' ? null : name;
+}

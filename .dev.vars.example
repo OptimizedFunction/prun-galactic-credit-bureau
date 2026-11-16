@@ -1,7 +1,12 @@
 # Copy to .dev.vars (git-ignored) for local development.
 # In production these are Cloudflare secrets: `wrangler secret put NAME`.
 
-# FIO API key of the bureau's FIO account (the one lenders grant permissionContracts to).
+# Encrypts the FIO API keys that lenders connect on the Track my loans page. Any long random string.
+# Changing it later makes every stored key unreadable (lenders would have to connect again).
+FIO_KEY_SECRET=
+
+# Optional: FIO API key of a bureau FIO account, used for lenders who granted it contract permission
+# instead of connecting their own key.
 FIO_API_KEY=
 
 # Discord OAuth application, for sign-in.

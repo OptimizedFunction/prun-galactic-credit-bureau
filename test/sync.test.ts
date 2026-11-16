@@ -189,7 +189,7 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
     },
   };
 
-  const first = await runSync(db, 'key', deps);
+  const first = await runSync(db, { bureauKey: 'key' }, deps);
   assert.deepEqual(
     { inserted: first.inserted, statusChanges: first.statusChanges, verified: first.verified, lendersFailed: first.lendersFailed, lenders: first.lenders },
     { inserted: 2, statusChanges: 1, verified: 1, lendersFailed: 1, lenders: 2 },
@@ -242,7 +242,7 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
 
   // Second run with the same data: nothing new, no duplicate loans or history, no repeat company lookups.
   companyLookups.length = 0;
-  const second = await runSync(db, 'key', { ...deps, now: new Date(DURING.getTime() + 3_600_000) });
+  const second = await runSync(db, { bureauKey: 'key' }, { ...deps, now: new Date(DURING.getTime() + 3_600_000) });
   assert.deepEqual({ inserted: second.inserted, statusChanges: second.statusChanges, verified: second.verified, durationsRefreshed: second.durationsRefreshed },
     { inserted: 0, statusChanges: 0, verified: 0, durationsRefreshed: 0 },
   );

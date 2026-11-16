@@ -1,20 +1,21 @@
 // Fetches every tracked lender from live FIO and prints what the sync WOULD change. Writes nothing.
-// Needs FIO_API_KEY in .dev.vars.
+// Needs FIO_API_KEY and/or FIO_KEY_SECRET in .dev.vars.
 //
 //   npm run sync:dry
 import { getPlatformProxy } from 'wrangler';
 import type { Currency, Status } from '../src/lib/normalize';
 import { fetchLoanContracts } from '../src/sync/fio';
 import { extractLoan, planSync, type ExistingLoan, type FioLoan, type LenderLoans } from '../src/sync/plan';
+import { fetchTracked, trackedLenders } from '../src/sync/run';
 
-const proxy = await getPlatformProxy<{ DB: D1Database; FIO_API_KEY?: string }>();
-const { DB: db, FIO_API_KEY: apiKey } = proxy.env;
+const proxy = await getPlatformProxy<{ DB: D1Database; FIO_API_KEY?: string; FIO_KEY_SECRET?: string }>();
+const { DB: db, FIO_API_KEY: bureauKey, FIO_KEY_SECRET: keySecret } = proxy.env;
 
 try {
-  if (!apiKey) throw new Error('FIO_API_KEY is not set in .dev.vars');
+  if (!bureauKey && !keySecret) throw new Error('Set FIO_API_KEY or FIO_KEY_SECRET in .dev.vars');
 
-  const lenders = (await db.prepare("SELECT username FROM lenders WHERE tracking_mode = 'fio' ORDER BY username").all<{ username: string }>()).results;
-  const results = await Promise.all(lenders.map((l) => fetchLoanContracts(apiKey, l.username)));
+  const lenders = await trackedLenders(db, { bureauKey, keySecret });
+  const results = await Promise.all(lenders.map((l) => fetchTracked(l, fetchLoanContracts)));
 
   const fetched: LenderLoans[] = [];
   const conditionTypes = new Map<string, number>();

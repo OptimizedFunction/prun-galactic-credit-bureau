@@ -23,14 +23,13 @@ app.notFound((c) => {
 export default {
   fetch: app.fetch,
 
-  /** Cron trigger (see wrangler.jsonc): pull every tracked lender's loans from FIO. */
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    if (!env.FIO_API_KEY) {
-      console.warn('FIO sync skipped: FIO_API_KEY is not set.');
+    if (!env.FIO_API_KEY && !env.FIO_KEY_SECRET) {
+      console.warn('FIO sync skipped: neither FIO_API_KEY nor FIO_KEY_SECRET is set.');
       return;
     }
     const graceDays = env.STALE_GRACE_DAYS ? Number(env.STALE_GRACE_DAYS) : undefined;
-    const summary = await runSync(env.DB, env.FIO_API_KEY, { graceDays });
+    const summary = await runSync(env.DB, { bureauKey: env.FIO_API_KEY, keySecret: env.FIO_KEY_SECRET }, { graceDays });
     console.log('FIO sync finished', JSON.stringify(summary));
   },
 } satisfies ExportedHandler<Env>;
