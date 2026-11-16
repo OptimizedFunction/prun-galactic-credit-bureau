@@ -1,0 +1,118 @@
+// Public read API, mounted at /api/v1. No key needed. The contract is openapi.yaml.
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import * as q from './db/queries';
+import { isCurrency, isStatus, normalizeContractId } from './lib/normalize';
+import type { Env } from './env';
+
+export const api = new Hono<{ Bindings: Env }>();
+
+class ApiError extends Error {
+  constructor(
+    readonly status: 400 | 404,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Integer "minor" fields are internal; the API exposes decimal strings only. */
+const json = (data: unknown, status = 200): Response =>
+  new Response(JSON.stringify(data, (key, value) => (key.endsWith('Minor') ? undefined : value)), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+
+api.use('*', cors({ origin: '*', allowMethods: ['GET', 'HEAD', 'OPTIONS'] }));
+
+api.use('*', async (c, next) => {
+  await next();
+  if (c.req.method === 'GET' && c.res.status === 200) c.header('Cache-Control', 'public, max-age=60');
+});
+
+api.onError((err, c) => {
+  if (err instanceof ApiError) return json({ error: { code: err.code, message: err.message } }, err.status);
+  console.error(err);
+  return json({ error: { code: 'internal_error', message: 'Something went wrong.' } }, 500);
+});
+
+api.notFound(() => json({ error: { code: 'not_found', message: 'No such endpoint.' } }, 404));
+
+function paging(query: Record<string, string>): { limit: number; offset: number } {
+  const int = (name: string, fallback: number, min: number, max: number) => {
+    const raw = query[name];
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < min || n > max) {
+      throw new ApiError(400, 'bad_request', `"${name}" must be a whole number from ${min} to ${max}.`);
+    }
+    return n;
+  };
+  return { limit: int('limit', 100, 1, 500), offset: int('offset', 0, 0, 1_000_000) };
+}
+
+function loanFilter(query: Record<string, string>): q.LoanFilter {
+  const { status, currency } = query;
+  if (status !== undefined && !isStatus(status)) throw new ApiError(400, 'bad_request', `Unknown status "${status}".`);
+  if (currency !== undefined && !isCurrency(currency)) throw new ApiError(400, 'bad_request', `Unknown currency "${currency}".`);
+  return {
+    lender: query['lender'],
+    borrower: query['borrower'],
+    contractId: normalizeContractId(query['contractId']) ?? undefined,
+    status,
+    currency,
+    ...paging(query),
+  };
+}
+
+api.get('/stats', async (c) => json(await q.getTotals(c.env.DB)));
+
+api.get('/search', async (c) => {
+  const term = (c.req.query('q') ?? '').trim();
+  if (term.length < 2) throw new ApiError(400, 'bad_request', '"q" must be at least 2 characters.');
+  return json(await q.search(c.env.DB, term));
+});
+
+api.get('/borrowers/:username', async (c) => {
+  const borrower = await q.getBorrower(c.env.DB, c.req.param('username'));
+  if (!borrower) throw new ApiError(404, 'not_found', 'No loans are recorded for this borrower.');
+  const [exposure, { loans }] = await Promise.all([
+    q.getBorrowerExposure(c.env.DB, borrower.id),
+    q.listLoans(c.env.DB, { borrower: borrower.username, limit: 500, offset: 0 }),
+  ]);
+  return json({ borrower, exposure, loans });
+});
+
+api.get('/lenders', async (c) => json({ lenders: await q.listLenders(c.env.DB) }));
+
+api.get('/lenders/:username', async (c) => {
+  const lender = await q.getLender(c.env.DB, c.req.param('username'));
+  if (!lender) throw new ApiError(404, 'not_found', 'No such lender.');
+  return json({ lender, exposure: await q.getLenderExposure(c.env.DB, lender.id) });
+});
+
+api.get('/lenders/:username/loans', async (c) => {
+  const lender = await q.getLender(c.env.DB, c.req.param('username'));
+  if (!lender) throw new ApiError(404, 'not_found', 'No such lender.');
+  const filter = { ...loanFilter(c.req.query()), lender: lender.username };
+  return json({ ...(await q.listLoans(c.env.DB, filter)), limit: filter.limit, offset: filter.offset });
+});
+
+api.get('/loans', async (c) => {
+  const filter = loanFilter(c.req.query());
+  return json({ ...(await q.listLoans(c.env.DB, filter)), limit: filter.limit, offset: filter.offset });
+});
+
+api.get('/loans/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id < 1) throw new ApiError(400, 'bad_request', 'Loan ID must be a positive whole number.');
+  const loan = await q.getLoan(c.env.DB, id);
+  if (!loan) throw new ApiError(404, 'not_found', 'No such loan.');
+  const [statusHistory, revisions] = await Promise.all([q.getLoanHistory(c.env.DB, id), q.getRevisions(c.env.DB, 'loan', id)]);
+  return json({ loan, statusHistory, revisions });
+});
+
+api.get('/leaderboards', async (c) => json({ leaderboards: await q.getLeaderboards(c.env.DB) }));
+
+api.get('/sync', async (c) => json({ lenders: await q.getSyncHealth(c.env.DB) }));
