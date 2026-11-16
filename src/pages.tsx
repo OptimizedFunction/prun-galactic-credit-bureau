@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import { html } from 'hono/html';
 import type { Child } from 'hono/jsx';
+import logoSvg from '../assets/logo.svg';
 import * as q from './db/queries';
 import { formatMinor, STATUS_LABELS, type Status } from './lib/normalize';
 import type { Env } from './env';
@@ -26,7 +27,7 @@ a:hover { text-decoration: underline; }
 header.site { background: var(--panel); border-bottom: 1px solid var(--line); }
 header.site .inner, main, footer { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 header.site .inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-top: 12px; padding-bottom: 12px; }
-header.site .brand { font-weight: 700; color: var(--text); margin-right: auto; }
+header.site .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); margin-right: auto; }
 header.site nav { display: flex; flex-wrap: wrap; gap: 16px; }
 main { padding-top: 24px; padding-bottom: 40px; }
 footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
@@ -68,12 +69,16 @@ const Layout = (props: { title: string; children?: Child }) => html`<!doctype ht
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>{props.title} · PrUn Credit Bureau</title>
+      <link rel="icon" type="image/svg+xml" href="/logo.svg" />
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
     </head>
     <body>
       <header class="site">
         <div class="inner">
-          <a class="brand" href="/">PrUn Credit Bureau</a>
+          <a class="brand" href="/">
+            <img src="/logo.svg" alt="" width="28" height="28" />
+            PrUn Credit Bureau
+          </a>
           <nav>
             <a href="/lenders">Lenders</a>
             <a href="/leaderboards">Leaderboards</a>
@@ -219,6 +224,8 @@ const NotFound = ({ what }: { what: string }) => (
     <SearchForm />
   </Layout>
 );
+
+pages.get('/logo.svg', (c) => c.body(logoSvg, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }));
 
 pages.get('/', async (c) => {
   const totals = await q.getTotals(c.env.DB);
