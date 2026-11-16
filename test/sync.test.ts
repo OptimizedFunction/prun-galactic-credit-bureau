@@ -124,6 +124,15 @@ test('plan: stale never replaces a resolved status, but a real FIO status replac
   assert.deepEqual([a!.kind, a!.kind === 'status' && a!.to], ['status', 'complete']);
 });
 
+test('plan: duration is refreshed from FIO on tracked loans only', () => {
+  const fio = [{ lender: 'Lena', loans: [loan('AAAAAAA', 'PARTIALLY_FULFILLED', {}, 10)] }];
+  const [a] = planSync([existing({ durationWeeks: 0 })], fio, DURING);
+  assert.deepEqual(a, { kind: 'duration', loanId: 1, contractId: 'AAAAAAA', from: 0, to: 10 });
+  assert.equal(planSync([existing({ durationWeeks: 10 })], fio, DURING).length, 0, 'same duration');
+  const manual = planSync([existing({ durationWeeks: 0, autoTrack: false })], fio, DURING);
+  assert.equal(manual.filter((x) => x.kind === 'duration').length, 0, 'manual rows keep their duration');
+});
+
 test('plan: a lender whose fetch failed is left alone', () => {
   assert.equal(planSync([existing({})], [{ lender: 'Lena', loans: null }], AFTER_GRACE_END).length, 0);
 });
@@ -159,8 +168,8 @@ before(async () => {
     // A tracked loan that will be breached, and a manual row the sync must not alter.
     db.prepare(
       `INSERT INTO loans (contract_id, lender_id, borrower_id, principal_minor, currency, issued_on, duration_weeks, status, trust, source, auto_track)
-       VALUES ('AAAAAAA', 1, 1, 1000000, 'AIC', '2026-01-01', 4, 'in_progress', 'fio_verified', 'sheet_import', 1),
-              ('MMMMMMM', 1, 1, 1000000, 'AIC', '2026-01-01', 4, 'complete', 'community_edited', 'sheet_import', 0)`,
+       VALUES ('AAAAAAA', 1, 1, 1000000, 'AIC', '2026-01-01', 0, 'in_progress', 'fio_verified', 'sheet_import', 1),
+              ('MMMMMMM', 1, 1, 1000000, 'AIC', '2026-01-01', 0, 'complete', 'community_edited', 'sheet_import', 0)`,
     ),
   ]);
 });
@@ -202,6 +211,13 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
     { inserted: 2, statusChanges: 1, verified: 1, lendersFailed: 1, lenders: 2 },
   );
   assert.deepEqual(companyLookups.sort(), ['Acme Mining', 'Liquidated Co'], 'one lookup per unknown company');
+  assert.equal(first.durationsRefreshed, 1);
+  const durations = (await db.prepare("SELECT contract_id, duration_weeks FROM loans WHERE contract_id IN ('AAAAAAA', 'MMMMMMM') ORDER BY contract_id").all<Record<string, unknown>>()).results;
+  assert.deepEqual(durations, [
+    { contract_id: 'AAAAAAA', duration_weeks: 4 },
+    // Manual row: verified, but its duration is left as entered.
+    { contract_id: 'MMMMMMM', duration_weeks: 0 },
+  ]);
 
   const loans = (await db.prepare('SELECT contract_id, status, trust, auto_track, source FROM loans ORDER BY contract_id').all<Record<string, unknown>>()).results;
   assert.deepEqual(loans, [
@@ -243,7 +259,9 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
   // Second run with the same data: nothing new, no duplicate loans or history, no repeat company lookups.
   companyLookups.length = 0;
   const second = await runSync(db, 'key', { ...deps, now: new Date(DURING.getTime() + 3_600_000) });
-  assert.deepEqual({ inserted: second.inserted, statusChanges: second.statusChanges, verified: second.verified }, { inserted: 0, statusChanges: 0, verified: 0 });
+  assert.deepEqual({ inserted: second.inserted, statusChanges: second.statusChanges, verified: second.verified, durationsRefreshed: second.durationsRefreshed },
+    { inserted: 0, statusChanges: 0, verified: 0, durationsRefreshed: 0 },
+  );
   assert.equal(companyLookups.length, 0);
   const counts = await db
     .prepare('SELECT (SELECT COUNT(*) FROM loans) AS loans, (SELECT COUNT(*) FROM loan_status_history) AS history, (SELECT COUNT(*) FROM fio_raw) AS raw')

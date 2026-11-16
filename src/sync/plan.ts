@@ -104,6 +104,8 @@ export type Action =
   | { kind: 'insert'; lender: string; loan: FioLoan; status: Status }
   /** A tracked loan whose status changed. `loan` is absent when FIO no longer returns it (Stale sweep). */
   | { kind: 'status'; loanId: number; contractId: string; from: Status; to: Status; loan?: FioLoan }
+  /** A tracked loan whose recorded duration differs from FIO's (the sheet had zeros and rounded figures). */
+  | { kind: 'duration'; loanId: number; contractId: string; from: number | null; to: number }
   /** A manual or lender-reported row that FIO confirms. Only its trust label changes. */
   | { kind: 'verify'; loanId: number; contractId: string; loan: FioLoan };
 
@@ -121,7 +123,7 @@ export function pastGrace(issuedOn: string, durationWeeks: number | null, now: D
  * Decides what to change.
  *
  * - New contracts are inserted.
- * - Tracked loans follow FIO's status. A real FIO status always wins.
+ * - Tracked loans follow FIO's status. A real FIO status always wins. Their duration follows FIO too.
  * - Stale: a loan FIO still shows as active, or no longer returns while the bureau has it active, becomes
  *   Stale once it is `graceDays` past maturity (measured from maturity, not issue date). Stale never
  *   replaces Complete, Breached or Terminated.
@@ -156,8 +158,13 @@ export function planSync(existing: ExistingLoan[], fetched: LenderLoans[], now: 
         if (matches && current.trust !== 'fio_verified') {
           actions.push({ kind: 'verify', loanId: current.id, contractId: current.contractId, loan });
         }
-      } else if (current.status !== status && !(status === 'stale' && RESOLVED.includes(current.status))) {
-        actions.push({ kind: 'status', loanId: current.id, contractId: current.contractId, from: current.status, to: status, loan });
+      } else {
+        if (current.status !== status && !(status === 'stale' && RESOLVED.includes(current.status))) {
+          actions.push({ kind: 'status', loanId: current.id, contractId: current.contractId, from: current.status, to: status, loan });
+        }
+        if (loan.durationWeeks !== null && (current.durationWeeks === null || Math.abs(current.durationWeeks - loan.durationWeeks) > 0.01)) {
+          actions.push({ kind: 'duration', loanId: current.id, contractId: current.contractId, from: current.durationWeeks, to: loan.durationWeeks });
+        }
       }
     }
   }

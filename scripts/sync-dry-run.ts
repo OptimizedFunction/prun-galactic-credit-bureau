@@ -101,7 +101,7 @@ try {
   const actions = planSync(existing, fetched, new Date());
   const tally = new Map<string, number>();
   for (const a of actions) {
-    const key = a.kind === 'insert' ? `new loan (${a.status})` : a.kind === 'status' ? `${a.from} -> ${a.to}${a.loan ? '' : ' (not returned by FIO)'}` : 'manual row verified';
+    const key = a.kind === 'insert' ? `new loan (${a.status})` : a.kind === 'status' ? `${a.from} -> ${a.to}${a.loan ? '' : ' (not returned by FIO)'}` : a.kind === 'duration' ? 'duration refreshed on a tracked loan' : 'manual row verified';
     tally.set(key, (tally.get(key) ?? 0) + 1);
   }
   console.log(`\nThe sync would make ${actions.length} changes:`);

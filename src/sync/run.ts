@@ -13,6 +13,7 @@ export interface SyncSummary {
   inserted: number;
   statusChanges: number;
   verified: number;
+  durationsRefreshed: number;
 }
 
 export interface SyncDeps {
@@ -178,6 +179,18 @@ export async function runSync(db: D1Database, apiKey: string, deps: SyncDeps = {
         const owner = existing.find((l) => l.id === a.loanId)!;
         statements.push(rawUpsert(a.loan, lenderIds.get(owner.lender.toLowerCase())!));
       }
+    } else if (a.kind === 'duration') {
+      // Tracked loans only; the guard is repeated in SQL so a manual row can never be touched.
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO revisions (entity_type, entity_id, action, actor_type, actor, before_json, after_json, created_at)
+             SELECT 'loan', id, 'update', 'system', 'fio-sync', json_object('durationWeeks', duration_weeks), json_object('durationWeeks', ?1), ?2
+             FROM loans WHERE id = ?3 AND auto_track = 1 AND duration_weeks IS NOT ?1`,
+          )
+          .bind(a.to, nowIso, a.loanId),
+        db.prepare('UPDATE loans SET duration_weeks = ?1, updated_at = ?2 WHERE id = ?3 AND auto_track = 1 AND duration_weeks IS NOT ?1').bind(a.to, nowIso, a.loanId),
+      );
     } else {
       statements.push(
         db
@@ -219,5 +232,6 @@ export async function runSync(db: D1Database, apiKey: string, deps: SyncDeps = {
     inserted: inserts.length,
     statusChanges: actions.filter((a) => a.kind === 'status').length,
     verified: actions.filter((a) => a.kind === 'verify').length,
+    durationsRefreshed: actions.filter((a) => a.kind === 'duration').length,
   };
 }
