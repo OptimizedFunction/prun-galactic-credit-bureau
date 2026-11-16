@@ -12,6 +12,7 @@ export const ledgerPages = new Hono<{ Bindings: Env }>();
 const LEDGER_CSS = `
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 12px 0; }
 .toolbar input[type=search] { flex: 1; min-width: 220px; padding: 8px 10px; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.hint { color: var(--muted); font-size: 13px; margin: -8px 0 16px; }
 #ledger-msg { min-height: 1.5em; font-weight: 600; }
 #ledger-msg.ok { color: var(--good); } #ledger-msg.err { color: var(--bad); }
 #ledger th { position: sticky; top: 0; background: var(--panel); z-index: 1; padding: 0; }
@@ -73,16 +74,21 @@ ledgerPages.get('/ledger', async (c) => {
       <style dangerouslySetInnerHTML={{ __html: LEDGER_CSS }} />
       <h1>Ledger</h1>
       <p class="sub">
-        Every loan in the bureau.{' '}
+        Every loan on record, in one table.{' '}
         {user ? (
-          <>Click a cell to edit it; Enter saves, Esc cancels, Tab moves on. Every change is public in <a href="/changes">Recent changes</a>.</>
+          <>
+            Click any cell to edit it. Each change is saved at once and listed in <a href="/changes">Recent changes</a>.
+          </>
         ) : (
           <>
             <a href="/auth/login?return=/ledger">Sign in with Discord</a> to edit.
           </>
-        )}{' '}
-        Loans with Auto track ticked are kept up to date from FIO: only their Notes can be edited unless you untick it. Other people's changes
-        appear here within about 30 seconds. Trust is set by the bureau, not typed in: see <a href="/about">About</a>.
+        )}
+      </p>
+      <p class="hint">
+        {user && <>Enter saves, Esc cancels, Tab moves to the next cell. </>}
+        Loans with Auto track ticked follow FIO, so only their notes can be edited. Trust is assigned by the bureau (see{' '}
+        <a href="/about">About</a>). Other people's changes appear within half a minute.
       </p>
       {user && (
         <details class="panel">
@@ -238,8 +244,8 @@ ledgerPages.get('/changes', async (c) => {
       <style dangerouslySetInnerHTML={{ __html: LEDGER_CSS }} />
       <h1>Recent changes</h1>
       <p class="sub">
-        Every edit made on this site, newest first.{' '}
-        {includeSystem ? <a href="/changes">Hide automatic changes</a> : <a href="/changes?system=1">Include automatic changes from the FIO sync</a>}.
+        A public record of every edit, newest first.{' '}
+        {includeSystem ? <a href="/changes">Hide automatic changes</a> : <a href="/changes?system=1">Show the FIO sync's automatic changes too</a>}.
         {!user && (
           <>
             {' '}

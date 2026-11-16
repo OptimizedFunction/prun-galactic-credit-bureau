@@ -94,7 +94,7 @@ export const Layout = (props: { title: string; wide?: boolean; children?: Child 
         </div>
       </header>
       <main class={props.wide ? 'wide' : undefined}>{props.children}</main>
-      <footer>Public data about lending in Prosperous Universe. Amounts are in-game currency and are never added across currencies.</footer>
+      <footer>A public record of lending in Prosperous Universe. Amounts are in-game currency and are never summed across currencies.</footer>
       <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
     </body>
   </html>
@@ -240,8 +240,8 @@ pages.get('/', async (c) => {
     <Layout title="Borrower lookup">
       <h1>PrUn Galactic Credit Bureau</h1>
       <p class="sub">
-        See what a borrower already owes, and to whom, before you lend. {totals.loans.toLocaleString('en-US')} loans from {totals.lenders} lenders to{' '}
-        {totals.borrowers} borrowers.
+        Know what a borrower owes, and to whom, before you lend. On record: {totals.loans.toLocaleString('en-US')} loans from {totals.lenders} lenders
+        to {totals.borrowers} borrowers.
       </p>
       <SearchForm />
       <h2>All recorded lending</h2>
@@ -374,7 +374,7 @@ pages.get('/lenders', async (c) => {
   return c.html(
     <Layout title="Lenders">
       <h1>Lenders</h1>
-      <p class="sub">Amounts are what each lender currently has out on loan, per currency.</p>
+      <p class="sub">Everyone who has lent, and what each has out on loan today in each currency.</p>
       <div class="scroll">
         <table>
           <thead>
@@ -588,7 +588,7 @@ pages.get('/leaderboards', async (c) => {
   return c.html(
     <Layout title="Leaderboards">
       <h1>Leaderboards</h1>
-      <p class="sub">Top 20 lenders in each currency. Terminated loans are not counted.</p>
+      <p class="sub">The twenty largest lenders in each currency, by all-time lending and by what is out today. Terminated loans are left out.</p>
       {boards.map((b) => (
         <>
           <h2>{b.currency}</h2>
@@ -607,7 +607,7 @@ pages.get('/sync', async (c) => {
   return c.html(
     <Layout title="Sync health">
       <h1>Sync health</h1>
-      <p class="sub">The latest attempt to read each automatically tracked lender's loan contracts from FIO.</p>
+      <p class="sub">When each automatically tracked lender was last read from FIO, and how it went.</p>
       <div class="scroll">
         <table>
           <thead>
@@ -650,10 +650,10 @@ pages.get('/about', (c) =>
       <h1>About the bureau</h1>
       <div class="panel">
         <p>
-          The PrUn Galactic Credit Bureau collects loans reported by lenders so that anyone can see how much a borrower already owes and how
-          their past loans ended. Reporting is optional. All data is public.
+          The PrUn Galactic Credit Bureau gathers the loans that lenders report into one public record, so anyone can see what a borrower
+          already owes and how their past loans ended. Reporting is voluntary, and everything here is public.
         </p>
-        <p>You can report in-game loan contracts, advances (advance purchases of goods) and sponsored bases.</p>
+        <p>Three kinds of lending belong here: in-game loan contracts, advances paid for goods yet to be delivered, and sponsored bases.</p>
         <h2>Statuses</h2>
         <dl class="facts">
           <dt>In Progress</dt>
@@ -680,13 +680,13 @@ pages.get('/about', (c) =>
         </dl>
         <h2>Editing</h2>
         <p>
-          Anyone who signs in with Discord can add, edit and delete loans in the <a href="/ledger">ledger</a>. Every change is listed with who made
-          it in <a href="/changes">Recent changes</a> and can be undone there. Loans with Auto track ticked follow FIO, so only their notes can be
-          edited.
+          Sign in with Discord and you can add, correct or remove any loan in the <a href="/ledger">ledger</a>. Each change is recorded under your
+          name in <a href="/changes">Recent changes</a>, where anyone signed in can undo it. Loans with Auto track ticked follow FIO, so only
+          their notes are open to editing.
         </p>
         <h2>API</h2>
         <p>
-          Everything on this site is available as JSON under <a href="/api/v1/stats">/api/v1</a>, with no key needed. For example{' '}
+          Everything on this site is also served as JSON under <a href="/api/v1/stats">/api/v1</a>, no key required. For example{' '}
           <code>/api/v1/borrowers/&#123;username&#125;</code>.
         </p>
       </div>
