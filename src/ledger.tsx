@@ -21,6 +21,8 @@ const LEDGER_CSS = `
 #ledger td[tabindex] { cursor: cell; }
 #ledger td[tabindex]:hover, #ledger td[tabindex]:focus { outline: 2px solid var(--link); outline-offset: -2px; }
 #ledger td.locked { color: var(--muted); }
+#ledger tr td { transition: background-color 1.5s; }
+#ledger tr.flash td { background-color: color-mix(in srgb, var(--link) 22%, transparent); transition: none; }
 #ledger td input:not([type=checkbox]), #ledger td select { width: 100%; min-width: 90px; padding: 3px 6px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--link); border-radius: 4px; }
 #ledger td.wrap { min-width: 260px; }
 #ledger td.st-breached { color: var(--bad); font-weight: 600; } #ledger td.st-complete { color: var(--good); } #ledger td.st-overdue, #ledger td.st-stale { color: var(--warn); }
@@ -38,9 +40,12 @@ details.panel[open] summary { margin-bottom: 12px; }
 ledgerPages.get('/ledger.js', (c) => c.body(ledgerScript, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
 
 ledgerPages.get('/ledger', async (c) => {
+  // Taken before the query, so the first background refresh picks up anything written while the page was loading.
+  const cursor = new Date().toISOString();
   const [user, { loans }] = await Promise.all([currentUser(c), q.listLoans(c.env.DB, { limit: 100_000, offset: 0 })]);
   const data = {
     user,
+    cursor,
     loans: loans.map((l) => ({
       id: l.id,
       lender: l.lender,
@@ -74,7 +79,8 @@ ledgerPages.get('/ledger', async (c) => {
             <a href="/auth/login?return=/ledger">Sign in with Discord</a> to edit.
           </>
         )}{' '}
-        Loans with Auto track ticked are kept up to date from FIO: only their Notes can be edited unless you untick it.
+        Loans with Auto track ticked are kept up to date from FIO: only their Notes can be edited unless you untick it. Other people's changes
+        appear here within about 30 seconds.
       </p>
       {user && (
         <details class="panel">
@@ -194,7 +200,8 @@ function undoRequest(change: q.Change): { method: string; url: string; body?: un
   if (change.action === 'create') return change.loanTracked ? null : { method: 'DELETE', url };
   if (change.action === 'update') {
     if ('deleted' in before) return change.loanTracked ? null : { method: 'DELETE', url };
-    return { method: 'PATCH', url, body: before };
+    // Only undo if the fields still hold what this change set them to; otherwise someone has edited them since.
+    return { method: 'PATCH', url, body: { ...before, expected: change.after } };
   }
   return null;
 }

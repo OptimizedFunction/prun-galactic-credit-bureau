@@ -30,7 +30,7 @@ api.use('*', cors({ origin: '*', allowMethods: ['GET', 'HEAD', 'OPTIONS'] }));
 
 api.use('*', async (c, next) => {
   await next();
-  if (c.req.method === 'GET' && c.res.status === 200) c.header('Cache-Control', 'public, max-age=60');
+  if (c.req.method === 'GET' && c.res.status === 200 && !c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'public, max-age=60');
 });
 
 api.onError((err, c) => {
@@ -160,8 +160,22 @@ api.post('/loans', async (c) => {
 api.patch('/loans/:id', async (c) => {
   const user = await editor(c);
   const id = loanId(c);
-  const changed = await edits.updateLoan(c.env.DB, id, edits.parseLoanFields(await jsonBody(c)), user);
-  return json({ loan: await q.getLoan(c.env.DB, id), changed });
+  const { expected, ...fields } = await jsonBody(c);
+  if (expected !== undefined && (expected === null || typeof expected !== 'object' || Array.isArray(expected))) {
+    throw new ApiError(400, 'bad_request', '"expected" must be an object of the values you were looking at.');
+  }
+  try {
+    const changed = await edits.updateLoan(c.env.DB, id, edits.parseLoanFields(fields), user, {
+      expected: expected ? edits.parseLoanFields(expected as Record<string, unknown>) : undefined,
+    });
+    return json({ loan: await q.getLoan(c.env.DB, id), changed });
+  } catch (err) {
+    // On a conflict, send the loan as it is now so the editor can show the current values.
+    if (err instanceof edits.EditError && err.kind === 'conflict') {
+      return json({ error: { code: 'conflict', message: err.message }, loan: await q.getLoan(c.env.DB, id) }, 409);
+    }
+    throw err;
+  }
 });
 
 api.delete('/loans/:id', async (c) => {
@@ -182,4 +196,17 @@ api.get('/changes', async (c) => {
   const { limit, offset } = paging(c.req.query());
   const changes = await q.listChanges(c.env.DB, { includeSystem: c.req.query('system') === '1', limit, offset });
   return json({ changes, limit, offset });
+});
+
+/** Loans changed since a moment in time, including deleted ones. The ledger polls this to pick up other people's edits. */
+api.get('/updates', async (c) => {
+  const since = c.req.query('since') ?? '';
+  const sinceMs = Date.parse(since);
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(since) || Number.isNaN(sinceMs)) throw new ApiError(400, 'bad_request', '"since" must be an ISO 8601 time.');
+  const cursor = new Date().toISOString();
+  // Look a few seconds further back than asked, so a write stamped just before the last poll is never missed.
+  const loans = await q.listLoansUpdatedSince(c.env.DB, new Date(sinceMs - 5000).toISOString());
+  return new Response(JSON.stringify({ loans, cursor }, (key, value) => (key.endsWith('Minor') ? undefined : value)), {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 });

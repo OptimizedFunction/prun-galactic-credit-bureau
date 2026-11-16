@@ -1,11 +1,13 @@
 // Community edits to loans. Every change runs in one transaction and writes a revision
 // (who, before, after); status changes also go to the status history.
 import {
+  formatMinor,
   isCurrency,
   minorToDecimal,
   normalizeContractId,
   parseAmountToMinor,
   statusFromLabel,
+  STATUS_LABELS,
   type Currency,
   type Status,
 } from '../lib/normalize';
@@ -146,6 +148,7 @@ interface CurrentRow {
   auto_track: number;
   notes: string | null;
   deleted_at: string | null;
+  version: number;
 }
 
 async function loadRow(db: D1Database, id: number): Promise<CurrentRow> {
@@ -153,7 +156,7 @@ async function loadRow(db: D1Database, id: number): Promise<CurrentRow> {
     .prepare(
       `SELECT l.id, le.username AS lender, b.username AS borrower, l.borrower_company_code, l.borrower_corp_code,
               l.principal_minor, l.currency, l.issued_on, l.duration_weeks, l.status, l.contract_id, l.auto_track,
-              l.notes, l.deleted_at
+              l.notes, l.deleted_at, l.version
        FROM loans l JOIN lenders le ON le.id = l.lender_id JOIN borrowers b ON b.id = l.borrower_id WHERE l.id = ?`,
     )
     .bind(id)
@@ -191,6 +194,41 @@ async function assertContractFree(db: D1Database, contractId: string | null, exc
   if (clash) {
     throw new EditError('conflict', `Contract ${contractId} is already recorded as loan #${clash.id}${clash.deleted_at ? ' (deleted; restore it instead)' : ''}.`);
   }
+}
+
+/** Runs a write batch, turning a duplicate contract ID (two people adding the same one at once) into a clear refusal. */
+async function runBatch(db: D1Database, statements: D1PreparedStatement[]): Promise<D1Result[]> {
+  try {
+    return await db.batch(statements);
+  } catch (err) {
+    if (String(err instanceof Error ? err.message : err).includes('loans.contract_id')) {
+      throw new EditError('conflict', 'That contract ID is already recorded on another loan.');
+    }
+    throw err;
+  }
+}
+
+const FIELD_LABELS: Record<FieldName, string> = {
+  lender: 'Lender',
+  borrower: 'Borrower',
+  companyCode: 'CO',
+  corpCode: 'CORP',
+  principal: 'Amount',
+  currency: 'Currency',
+  issuedOn: 'Issued date',
+  durationWeeks: 'Duration',
+  status: 'Status',
+  contractId: 'Contract ID',
+  autoTrack: 'Auto track',
+  notes: 'Notes',
+};
+
+function describe(key: keyof LoanFields, value: unknown): string {
+  if (value === null || value === undefined) return 'blank';
+  if (key === 'principalMinor') return formatMinor(value as number);
+  if (key === 'status') return STATUS_LABELS[value as Status];
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  return `"${String(value)}"`;
 }
 
 const upsertLender = (db: D1Database, username: string) => db.prepare('INSERT INTO lenders (username) VALUES (?) ON CONFLICT (username) DO NOTHING').bind(username);
@@ -231,7 +269,7 @@ export async function createLoan(db: D1Database, input: Partial<LoanFields>, edi
   const nowIso = now.toISOString();
   const ref = `manual:${crypto.randomUUID()}`;
   const loanId = '(SELECT id FROM loans WHERE source_ref = ?)';
-  await db.batch([
+  await runBatch(db, [
     upsertLender(db, f.lender),
     upsertBorrower(db, f.borrower, f.companyCode, f.corpCode),
     db
@@ -256,8 +294,28 @@ export async function createLoan(db: D1Database, input: Partial<LoanFields>, edi
   return row!.id;
 }
 
+export interface UpdateOptions {
+  /**
+   * The values the editor was looking at. If a field being changed no longer holds the value given here,
+   * someone else got there first and the edit is refused instead of overwriting them.
+   */
+  expected?: Partial<LoanFields>;
+  now?: Date;
+}
+
 /** Applies the given fields to a loan. Returns the names of the fields that actually changed. */
-export async function updateLoan(db: D1Database, id: number, input: Partial<LoanFields>, editor: Editor, now = new Date()): Promise<string[]> {
+export async function updateLoan(db: D1Database, id: number, input: Partial<LoanFields>, editor: Editor, options: UpdateOptions = {}): Promise<string[]> {
+  // The write only lands if the loan is still at the version that was read. If another write slipped in
+  // between, read again and re-check, so "before" values in the history are always the real ones.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const result = await tryUpdate(db, id, input, editor, options);
+    if (result !== 'retry') return result;
+  }
+  throw new EditError('conflict', 'This loan is being changed by someone else right now. Try again.');
+}
+
+async function tryUpdate(db: D1Database, id: number, input: Partial<LoanFields>, editor: Editor, options: UpdateOptions): Promise<string[] | 'retry'> {
+  const now = options.now ?? new Date();
   const row = await loadRow(db, id);
   if (row.deleted_at) throw new EditError('conflict', 'This loan is deleted. Restore it before editing.');
   const current = fromRow(row);
@@ -273,9 +331,20 @@ export async function updateLoan(db: D1Database, id: number, input: Partial<Loan
   const changed = Object.keys(after) as (keyof LoanFields)[];
   if (changed.length === 0) return [];
 
+  const apiName = (k: keyof LoanFields): FieldName => (k === 'principalMinor' ? 'principal' : k);
+  const expected = options.expected ?? {};
+  for (const key of changed) {
+    if (key in expected && !same(expected[key], current[key])) {
+      const last = await db.prepare("SELECT actor FROM revisions WHERE entity_type = 'loan' AND entity_id = ? ORDER BY id DESC LIMIT 1").bind(id).first<{ actor: string }>();
+      throw new EditError(
+        'conflict',
+        `${FIELD_LABELS[apiName(key)]} was changed to ${describe(key, current[key])}${last ? ` by ${last.actor}` : ''} while you were editing. Your change was not saved.`,
+      );
+    }
+  }
+
   // A loan the sync manages only takes notes and the tracking switch, unless this same edit switches tracking off.
   const staysTracked = current.autoTrack && after.autoTrack !== false;
-  const apiName = (k: keyof LoanFields): FieldName => (k === 'principalMinor' ? 'principal' : k);
   if (staysTracked && changed.some((k) => !TRACKED_EDITABLE.includes(apiName(k)))) {
     throw new EditError('conflict', 'This loan is kept up to date from FIO. Only Notes can be edited; untick Auto track to edit the rest.');
   }
@@ -289,19 +358,21 @@ export async function updateLoan(db: D1Database, id: number, input: Partial<Loan
   if (after.borrower !== undefined) statements.push(upsertBorrower(db, after.borrower, next.companyCode, next.corpCode));
   if (after.status !== undefined) {
     statements.push(
-      db.prepare("INSERT INTO loan_status_history (loan_id, old_status, new_status, changed_at, source) VALUES (?, ?, ?, ?, 'edit')").bind(id, current.status, after.status, nowIso),
+      db
+        .prepare("INSERT INTO loan_status_history (loan_id, old_status, new_status, changed_at, source) SELECT id, ?, ?, ?, 'edit' FROM loans WHERE id = ? AND version = ?")
+        .bind(current.status, after.status, nowIso, id, row.version),
     );
   }
   statements.push(
     db
       .prepare(
         `INSERT INTO revisions (entity_type, entity_id, action, actor_type, actor, actor_id, before_json, after_json, created_at)
-         VALUES ('loan', ?, 'update', 'user', ?, ?, ?, ?, ?)`,
+         SELECT 'loan', id, 'update', 'user', ?, ?, ?, ?, ? FROM loans WHERE id = ? AND version = ?`,
       )
-      .bind(id, editor.name, editor.id, JSON.stringify(publicValues(before)), JSON.stringify(publicValues(after)), nowIso),
+      .bind(editor.name, editor.id, JSON.stringify(publicValues(before)), JSON.stringify(publicValues(after)), nowIso, id, row.version),
   );
 
-  const sets: string[] = ['updated_at = ?'];
+  const sets: string[] = ['version = version + 1', 'updated_at = ?'];
   const args: (string | number | null)[] = [nowIso];
   const set = (sql: string, value: string | number | null) => (sets.push(sql), args.push(value));
   if (after.lender !== undefined) set('lender_id = (SELECT id FROM lenders WHERE username = ?)', after.lender);
@@ -317,9 +388,10 @@ export async function updateLoan(db: D1Database, id: number, input: Partial<Loan
   if (after.autoTrack !== undefined) set('auto_track = ?', after.autoTrack ? 1 : 0);
   if ('notes' in after) set('notes = ?', after.notes ?? null);
   if (changed.some((k) => !NOT_FACTS.includes(apiName(k)))) sets.push("trust = 'community_edited'");
-  statements.push(db.prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ?`).bind(...args, id));
+  statements.push(db.prepare(`UPDATE loans SET ${sets.join(', ')} WHERE id = ? AND version = ?`).bind(...args, id, row.version));
 
-  await db.batch(statements);
+  const results = await runBatch(db, statements);
+  if (results[results.length - 1]!.meta.changes === 0) return 'retry';
   return changed.map(apiName);
 }
 
@@ -336,7 +408,7 @@ export async function deleteLoan(db: D1Database, id: number, editor: Editor, now
          VALUES ('loan', ?, 'delete', 'user', ?, ?, ?, ?)`,
       )
       .bind(id, editor.name, editor.id, JSON.stringify(publicValues(fromRow(row))), nowIso),
-    db.prepare('UPDATE loans SET deleted_at = ?, updated_at = ? WHERE id = ?').bind(nowIso, nowIso, id),
+    db.prepare('UPDATE loans SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE id = ?').bind(nowIso, nowIso, id),
   ]);
 }
 
@@ -351,6 +423,6 @@ export async function restoreLoan(db: D1Database, id: number, editor: Editor, no
          VALUES ('loan', ?, 'update', 'user', ?, ?, '{"deleted":true}', '{"deleted":false}', ?)`,
       )
       .bind(id, editor.name, editor.id, nowIso),
-    db.prepare('UPDATE loans SET deleted_at = NULL, updated_at = ? WHERE id = ?').bind(nowIso, id),
+    db.prepare('UPDATE loans SET deleted_at = NULL, updated_at = ?, version = version + 1 WHERE id = ?').bind(nowIso, id),
   ]);
 }

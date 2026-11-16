@@ -166,14 +166,15 @@ export async function runSync(db: D1Database, apiKey: string, deps: SyncDeps = {
       );
     } else if (a.kind === 'status') {
       statements.push(
-        // History first, reading the old status from the row itself, then the update. Both no-ops if already applied.
+        // History first, reading the old status from the row itself, then the update. Both are no-ops if already
+        // applied, or if someone switched tracking off for this loan after the sync read it.
         db
           .prepare(
             `INSERT INTO loan_status_history (loan_id, old_status, new_status, changed_at, source)
-             SELECT id, status, ?, ?, 'fio_sync' FROM loans WHERE id = ? AND status <> ?`,
+             SELECT id, status, ?, ?, 'fio_sync' FROM loans WHERE id = ? AND status <> ? AND auto_track = 1`,
           )
           .bind(a.to, nowIso, a.loanId, a.to),
-        db.prepare('UPDATE loans SET status = ?, updated_at = ? WHERE id = ? AND status <> ?').bind(a.to, nowIso, a.loanId, a.to),
+        db.prepare('UPDATE loans SET status = ?, updated_at = ?, version = version + 1 WHERE id = ? AND status <> ? AND auto_track = 1').bind(a.to, nowIso, a.loanId, a.to),
       );
       if (a.loan) {
         const owner = existing.find((l) => l.id === a.loanId)!;
@@ -189,7 +190,7 @@ export async function runSync(db: D1Database, apiKey: string, deps: SyncDeps = {
              FROM loans WHERE id = ?3 AND auto_track = 1 AND duration_weeks IS NOT ?1`,
           )
           .bind(a.to, nowIso, a.loanId),
-        db.prepare('UPDATE loans SET duration_weeks = ?1, updated_at = ?2 WHERE id = ?3 AND auto_track = 1 AND duration_weeks IS NOT ?1').bind(a.to, nowIso, a.loanId),
+        db.prepare('UPDATE loans SET duration_weeks = ?1, updated_at = ?2, version = version + 1 WHERE id = ?3 AND auto_track = 1 AND duration_weeks IS NOT ?1').bind(a.to, nowIso, a.loanId),
       );
     } else {
       statements.push(
@@ -200,7 +201,7 @@ export async function runSync(db: D1Database, apiKey: string, deps: SyncDeps = {
              FROM loans WHERE id = ? AND trust <> 'fio_verified'`,
           )
           .bind(nowIso, a.loanId),
-        db.prepare("UPDATE loans SET trust = 'fio_verified', updated_at = ? WHERE id = ? AND trust <> 'fio_verified'").bind(nowIso, a.loanId),
+        db.prepare("UPDATE loans SET trust = 'fio_verified', updated_at = ?, version = version + 1 WHERE id = ? AND trust <> 'fio_verified'").bind(nowIso, a.loanId),
       );
     }
   }

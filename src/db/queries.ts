@@ -469,3 +469,9 @@ export async function listChanges(db: D1Database, opts: { includeSystem: boolean
     loanTracked: r.auto_track === 1,
   }));
 }
+
+/** Loans written at or after `since`, deleted ones included, oldest change first. For the ledger's background refresh. */
+export async function listLoansUpdatedSince(db: D1Database, since: string, limit = 500): Promise<Loan[]> {
+  const { results } = await db.prepare(`${LOAN_SELECT} WHERE l.updated_at >= ? ORDER BY l.updated_at, l.id LIMIT ?`).bind(since, limit).all<LoanRow>();
+  return results.map(toLoan);
+}

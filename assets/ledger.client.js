@@ -87,7 +87,12 @@
     }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401) throw new Error('Your sign-in has expired. Reload the page and sign in again.');
-    if (!res.ok) throw new Error(data.error?.message ?? `Request failed (${res.status}).`);
+    if (!res.ok) {
+      const err = new Error(data.error?.message ?? `Request failed (${res.status}).`);
+      // A conflict comes with the loan as it is now.
+      err.loan = data.loan;
+      throw err;
+    }
     return data;
   }
 
@@ -183,16 +188,19 @@
     tr.append(document.createElement('th'));
   }
 
-  async function save(loan, tr, patch) {
+  /** `expected` holds the values this browser was showing, so the server can refuse if someone changed them meanwhile. */
+  async function save(loan, tr, patch, expected) {
     try {
-      const data = await call('PATCH', '/api/v1/loans/' + loan.id, patch);
+      const data = await call('PATCH', '/api/v1/loans/' + loan.id, { ...patch, expected });
       Object.assign(loan, flat(data.loan));
       fillRow(tr, loan);
       applyFilter();
       if (data.changed.length) say('Saved.');
       return true;
     } catch (err) {
+      if (err.loan && !err.loan.deletedAt) Object.assign(loan, flat(err.loan));
       fillRow(tr, loan);
+      applyFilter();
       say(err.message, true);
       return false;
     }
@@ -242,7 +250,7 @@
       const value = input.value.trim();
       const target = move ? nextEditable(td, move < 0) : null;
       const where = target ? { id: target.parentElement.dataset.id, f: target.dataset.f } : null;
-      if (commit && value !== before) await save(loan, tr, { [col.f]: value === '' ? null : value });
+      if (commit && value !== before) await save(loan, tr, { [col.f]: value === '' ? null : value }, { [col.f]: before === '' ? null : before });
       else fillRow(tr, loan);
       if (where) {
         // The row may have been redrawn, so find the target cell again.
@@ -286,7 +294,7 @@
   table.addEventListener('change', (e) => {
     if (e.target.type !== 'checkbox') return;
     const tr = e.target.closest('tr');
-    save(byId.get(Number(tr.dataset.id)), tr, { autoTrack: e.target.checked });
+    save(byId.get(Number(tr.dataset.id)), tr, { autoTrack: e.target.checked }, { autoTrack: !e.target.checked });
   });
   table.addEventListener('keydown', (e) => {
     if ((e.key === 'Enter' || e.key === 'F2') && e.target.matches('td[data-f]')) {
@@ -320,6 +328,66 @@
       }
     });
   }
+
+  // ---- Background refresh: pick up other people's changes every 30 seconds while the tab is visible. ----
+  let cursor = boot.cursor;
+  let refreshing = false;
+  function flash(tr) {
+    tr.classList.add('flash');
+    setTimeout(() => tr.classList.remove('flash'), 400);
+  }
+  async function refresh() {
+    if (document.hidden || refreshing) return;
+    refreshing = true;
+    try {
+      const res = await fetch('/api/v1/updates?since=' + encodeURIComponent(cursor));
+      if (!res.ok) return;
+      const data = await res.json();
+      cursor = data.cursor;
+      let updated = 0;
+      for (const incoming of data.loans) {
+        const have = byId.get(incoming.id);
+        const tr = have ? table.querySelector(`tr[data-id="${incoming.id}"]`) : null;
+        if (incoming.deletedAt) {
+          if (!have) continue;
+          loans = loans.filter((l) => l !== have);
+          byId.delete(incoming.id);
+          if (tr) tr.remove();
+          updated++;
+          continue;
+        }
+        const next = flat(incoming);
+        if (!have) {
+          loans.unshift(next);
+          byId.set(next.id, next);
+          const row = document.createElement('tr');
+          fillRow(row, next);
+          table.tBodies[0].prepend(row);
+          flash(row);
+          updated++;
+          continue;
+        }
+        if (JSON.stringify(have) === JSON.stringify(next)) continue;
+        Object.assign(have, next);
+        updated++;
+        // A row with a cell open for editing is left alone; saving that cell will report the conflict if there is one.
+        if (tr && !tr.querySelector('td input:not([type=checkbox]), td select')) {
+          fillRow(tr, have);
+          flash(tr);
+        }
+      }
+      if (updated) {
+        applyFilter();
+        say(updated === 1 ? '1 loan was updated by someone else.' : `${updated} loans were updated by others.`);
+      }
+    } catch {
+      // Offline or the server is restarting: try again on the next tick.
+    } finally {
+      refreshing = false;
+    }
+  }
+  setInterval(refresh, 30000);
+  document.addEventListener('visibilitychange', refresh);
 
   header();
   render();

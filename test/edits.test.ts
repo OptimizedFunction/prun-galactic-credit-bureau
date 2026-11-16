@@ -135,3 +135,73 @@ test('sessions are signed: tampered, foreign and expired cookies are rejected', 
   const forged = btoa(JSON.stringify({ id: '999', name: 'mallory', exp: now + 1e9 })).replace(/=+$/, '');
   assert.equal(await readSession(`${forged}.${cookie.split('.')[1]}`, 'secret-a', now), null, 'payload swapped');
 });
+
+const newLoan = (over: Record<string, unknown> = {}) =>
+  createLoan(db, parseLoanFields({ lender: 'Lena', borrower: 'Bob', principal: '1,000,000', currency: 'AIC', issuedOn: '2026-04-01', status: 'In Progress', ...over }), ANN);
+
+test('an edit is refused when the value changed under the editor', async () => {
+  const id = await newLoan();
+  // Ben saves first. Ann was still looking at "In Progress" and "1,000,000".
+  await updateLoan(db, id, parseLoanFields({ status: 'Overdue' }), BEN, { expected: parseLoanFields({ status: 'In Progress' }) });
+  await rejects(
+    () => updateLoan(db, id, parseLoanFields({ status: 'Complete' }), ANN, { expected: parseLoanFields({ status: 'In Progress' }) }),
+    'conflict',
+    /Status was changed to Overdue by ben while you were editing/,
+  );
+  assert.equal((await q.getLoan(db, id))!.status, 'overdue', 'Ben’s value stands');
+
+  // A different cell of the same loan is not a conflict.
+  await updateLoan(db, id, parseLoanFields({ principal: '1,500,000' }), ANN, { expected: parseLoanFields({ principal: '1000000' }) });
+  // Nor is making the change someone else already made.
+  assert.deepEqual(await updateLoan(db, id, parseLoanFields({ status: 'Overdue' }), ANN, { expected: parseLoanFields({ status: 'In Progress' }) }), []);
+  const loan = (await q.getLoan(db, id))!;
+  assert.deepEqual({ status: loan.status, principal: loan.principal }, { status: 'overdue', principal: '1500000.00' });
+});
+
+test('two saves at the same moment both land, with a truthful history', async () => {
+  const id = await newLoan();
+  // Different cells: both are kept.
+  await Promise.all([updateLoan(db, id, parseLoanFields({ notes: 'from ann' }), ANN), updateLoan(db, id, parseLoanFields({ durationWeeks: '9' }), BEN)]);
+  let loan = (await q.getLoan(db, id))!;
+  assert.deepEqual({ notes: loan.notes, weeks: loan.durationWeeks }, { notes: 'from ann', weeks: 9 });
+
+  // Same cell, no "expected": last write wins, but each revision's "before" is what was really there.
+  await Promise.all([updateLoan(db, id, parseLoanFields({ status: 'Overdue' }), ANN), updateLoan(db, id, parseLoanFields({ status: 'Breached' }), BEN)]);
+  loan = (await q.getLoan(db, id))!;
+  const statusRevisions = (await q.getRevisions(db, 'loan', id)).filter((r) => r.action === 'update' && (r.after as Record<string, unknown> | null)?.['status']).reverse();
+  const chain = statusRevisions.map((r) => [(r.before as Record<string, unknown>)['status'], (r.after as Record<string, unknown>)['status']]);
+  assert.equal(chain.length, 2);
+  assert.equal(chain[0]![0], 'in_progress');
+  assert.equal(chain[1]![0], chain[0]![1], 'the second change starts from what the first one left');
+  assert.equal(chain[1]![1], loan.status);
+  assert.deepEqual((await q.getLoanHistory(db, id)).map((h) => h.newStatus), ['in_progress', chain[0]![1], chain[1]![1]]);
+
+  // Same cell, both saying what they saw: exactly one wins.
+  const outcomes = await Promise.allSettled([
+    updateLoan(db, id, parseLoanFields({ notes: 'ann wins' }), ANN, { expected: parseLoanFields({ notes: 'from ann' }) }),
+    updateLoan(db, id, parseLoanFields({ notes: 'ben wins' }), BEN, { expected: parseLoanFields({ notes: 'from ann' }) }),
+  ]);
+  assert.deepEqual(outcomes.map((o) => o.status).sort(), ['fulfilled', 'rejected']);
+});
+
+test('the refresh feed returns loans changed since a time, deleted ones included', async () => {
+  const id = await newLoan();
+  const other = await newLoan();
+  const mark = new Date(Date.now() + 5).toISOString();
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.deepEqual(await q.listLoansUpdatedSince(db, mark), []);
+
+  await updateLoan(db, id, parseLoanFields({ notes: 'changed' }), BEN);
+  await deleteLoan(db, other, BEN);
+  const changed = await q.listLoansUpdatedSince(db, mark);
+  assert.deepEqual(changed.map((l) => [l.id, l.notes, Boolean(l.deletedAt)]), [[id, 'changed', false], [other, null, true]]);
+});
+
+test('adding the same contract ID twice at once gives one loan and a clear refusal', async () => {
+  const add = () => newLoan({ contractId: 'RACE001' });
+  const outcomes = await Promise.allSettled([add(), add()]);
+  assert.deepEqual(outcomes.map((o) => o.status).sort(), ['fulfilled', 'rejected']);
+  const failure = outcomes.find((o) => o.status === 'rejected') as PromiseRejectedResult;
+  assert.ok(failure.reason instanceof EditError && failure.reason.kind === 'conflict', String(failure.reason));
+  assert.equal((await q.listLoans(db, { contractId: 'RACE001', limit: 5, offset: 0 })).total, 1);
+});
