@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+dist/
+
+# Secrets: never commit. See .dev.vars.example.
+.dev.vars
+.env
+
+# Downloaded sheet CSVs and import reports
+data/
+
+# Local planning notes
+ISDB banking plan.md

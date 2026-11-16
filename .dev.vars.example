@@ -1,0 +1,9 @@
+# Copy to .dev.vars (git-ignored) for local development.
+# In production these are Cloudflare secrets: `wrangler secret put NAME`.
+
+# FIO API key of the bureau's FIO account (the one lenders grant permissionContracts to).
+FIO_API_KEY=
+
+# Discord OAuth application, for sign-in.
+DISCORD_CLIENT_ID=
+DISCORD_CLIENT_SECRET=

@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "prun-credit-bureau",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-04-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bureau",
+      // Placeholder: local dev ignores it. Replace with the real ID from `wrangler d1 create bureau` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
