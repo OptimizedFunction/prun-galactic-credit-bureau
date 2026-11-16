@@ -132,6 +132,29 @@ try {
     ),
   );
 
+  // Owner's decision (2026-11-17): assume goodwill for loans the sheet left Stale. The sheet's script marked
+  // loans Stale once FIO stopped returning them, including ones it had already seen Complete. Unless a loan
+  // was ever breached, treat it as repaid. Recorded as an edit so the change shows in both histories.
+  const staleFix = "status = 'stale' AND NOT EXISTS (SELECT 1 FROM loan_status_history h WHERE h.loan_id = loans.id AND 'breached' IN (h.old_status, h.new_status))";
+  const [, , fixed] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO loan_status_history (loan_id, old_status, new_status, changed_at, source)
+         SELECT id, 'stale', 'complete', ?, 'edit' FROM loans WHERE ${staleFix}`,
+      )
+      .bind(importedAt),
+    db
+      .prepare(
+        `INSERT INTO revisions (entity_type, entity_id, action, actor_type, actor, before_json, after_json, created_at)
+         SELECT 'loan', id, 'update', 'system', 'sheet-import', json_object('status', 'stale'),
+                json_object('status', 'complete', 'reason', 'Stale in the sheet and never breached: assumed repaid'), ?
+         FROM loans WHERE ${staleFix}`,
+      )
+      .bind(importedAt),
+    db.prepare(`UPDATE loans SET status = 'complete' WHERE ${staleFix}`),
+  ]);
+  const staleToComplete = fixed!.meta.changes;
+
   // The sheet's last sync, as one run.
   await runBatched(
     db,
@@ -175,8 +198,9 @@ try {
     `- Loans imported: ${counts.loans}`,
     `- Lenders: ${counts.lenders} (${fioTracked.size} tracked through FIO)`,
     `- Borrowers: ${counts.borrowers}`,
-    `- Status history entries: ${counts.history} of ${history.entries.length}`,
+    `- Status history entries: ${matched.length} of ${history.entries.length} from the sheet`,
     `- Lender sync results: ${counts.syncRuns}`,
+    `- Stale loans changed to Complete (never breached, assumed repaid): ${staleToComplete}`,
     '',
     '## Loans by status',
     '',
@@ -196,6 +220,7 @@ try {
   fs.writeFileSync(reportPath, lines.join('\n'));
 
   console.log(`Imported ${counts.loans} loans, ${counts.lenders} lenders, ${counts.borrowers} borrowers, ${counts.history} history entries.`);
+  console.log(`Stale loans changed to Complete: ${staleToComplete}`);
   console.log(`Data-quality issues: ${issues.length} (${[...byKind.entries()].map(([k, l]) => `${k} ${l.length}`).join(', ')})`);
   console.log(`Report: ${reportPath}`);
   if (counts.loans !== ledger.loans.length) {
