@@ -9,18 +9,25 @@ export interface ConnectedLender {
 
 /**
  * Stores a lender's (already encrypted) FIO key and switches them to automatic tracking.
- * The caller must already have confirmed with FIO that the key belongs to `username`.
+ * The caller must already have asked FIO whose key it is; `username` is that account.
  */
-export async function connectLender(db: D1Database, username: string, sealedKey: string, editor: Editor, now = new Date()): Promise<void> {
-  const nowIso = now.toISOString();
+export async function connectLender(
+  db: D1Database,
+  username: string,
+  sealedKey: string,
+  editor: Editor,
+  options: { companyCode?: string | null; now?: Date } = {},
+): Promise<void> {
+  const nowIso = (options.now ?? new Date()).toISOString();
   await db.batch([
     db
       .prepare(
-        `INSERT INTO lenders (username, tracking_mode, fio_key_enc, fio_key_added_by, fio_key_added_by_id, fio_key_added_at)
-         VALUES (?1, 'fio', ?2, ?3, ?4, ?5)
-         ON CONFLICT (username) DO UPDATE SET tracking_mode = 'fio', fio_key_enc = ?2, fio_key_added_by = ?3, fio_key_added_by_id = ?4, fio_key_added_at = ?5`,
+        `INSERT INTO lenders (username, tracking_mode, fio_key_enc, fio_key_added_by, fio_key_added_by_id, fio_key_added_at, company_code)
+         VALUES (?1, 'fio', ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (username) DO UPDATE SET tracking_mode = 'fio', fio_key_enc = ?2, fio_key_added_by = ?3, fio_key_added_by_id = ?4,
+           fio_key_added_at = ?5, company_code = COALESCE(?6, lenders.company_code)`,
       )
-      .bind(username, sealedKey, editor.name, editor.id, nowIso),
+      .bind(username, sealedKey, editor.name, editor.id, nowIso, options.companyCode ?? null),
     // The audit row says that a key was connected, never the key itself.
     db
       .prepare(

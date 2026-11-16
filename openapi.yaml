@@ -283,9 +283,9 @@ paths:
       tags: [Tracking]
       summary: Connect a lender's FIO API key
       description: |
-        The bureau asks FIO whose key it is and refuses unless it belongs to `username`. The key is stored
-        encrypted and used only to read that account's loan contracts. The lender is switched to automatic
-        tracking and a sync starts straight away.
+        The bureau asks FIO whose key it is and connects that account; no username is sent. The key is
+        stored encrypted and used only to read that account's loan contracts. The lender is switched to
+        automatic tracking and a sync starts straight away.
       security:
         - session: []
       requestBody:
@@ -294,10 +294,9 @@ paths:
           application/json:
             schema:
               type: object
-              required: [username, apiKey]
+              required: [apiKey]
               properties:
-                username: { type: string, description: The lender's Prosperous Universe username. }
-                apiKey: { type: string, description: A FIO API key created by that account. }
+                apiKey: { type: string, description: A FIO API key created by the lender's own FIO account. }
       responses:
         '201':
           description: Connected.
@@ -316,7 +315,7 @@ paths:
                   contractsFound: { type: integer, description: Loan contracts FIO returned for the account. }
                   loansFound: { type: integer, description: Of those, live loans this account paid out. }
         '400':
-          description: FIO does not recognise the key, or it belongs to a different account.
+          description: FIO does not recognise the key.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

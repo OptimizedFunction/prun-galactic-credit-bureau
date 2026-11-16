@@ -105,3 +105,27 @@ export async function fetchKeyOwner(apiKey: string, fetcher: typeof fetch = fetc
   const name = (await res.text()).trim();
   return name === '' ? null : name;
 }
+
+export interface FioUser {
+  /** Username with its real capitalisation. */
+  username: string;
+  companyCode: string | null;
+  corpCode: string | null;
+}
+
+/** A FIO user's public profile. null if FIO has none or the call fails. */
+export async function fetchUser(apiKey: string, username: string, fetcher: typeof fetch = fetch): Promise<FioUser | null> {
+  try {
+    const res = await fetcher(`${FIO_BASE}/user/${encodeURIComponent(username)}`, {
+      headers: { Authorization: apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status !== 200) return null;
+    const body = (await res.json()) as { UserName?: unknown; CompanyCode?: unknown; CorporationCode?: unknown };
+    if (typeof body.UserName !== 'string' || body.UserName.trim() === '') return null;
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+    return { username: body.UserName.trim(), companyCode: text(body.CompanyCode), corpCode: text(body.CorporationCode) };
+  } catch {
+    return null;
+  }
+}

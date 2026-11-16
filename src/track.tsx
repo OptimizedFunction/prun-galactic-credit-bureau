@@ -38,7 +38,7 @@ const TRACK_SCRIPT = `
     button.disabled = true;
     say('Checking the key with FIO…');
     try {
-      const data = await call('POST', '/api/v1/fio-keys', { username: form.username.value.trim(), apiKey: form.apiKey.value.trim() });
+      const data = await call('POST', '/api/v1/fio-keys', { apiKey: form.apiKey.value.trim() });
       form.reset();
       say('Connected ' + data.lender.username + '. FIO has ' + data.loansFound + ' loan' + (data.loansFound === 1 ? '' : 's') + ' you paid out; they will appear on your lender page within a minute.');
       setTimeout(() => location.reload(), 4000);
@@ -78,8 +78,8 @@ trackPages.get('/track', async (c) => {
           <li>
             In <a href="https://fio.fnar.net/settings">FIO</a>, open Settings and create an API key. Name it something like “Credit Bureau”.
           </li>
-          <li>Paste it below with your Prosperous Universe username.</li>
-          <li>The bureau confirms with FIO that the key is yours, then starts reading your loan contracts.</li>
+          <li>Paste it below. There is nothing else to fill in.</li>
+          <li>The bureau asks FIO whose key it is, then starts reading that account's loan contracts.</li>
         </ol>
         {!available ? (
           <p class="muted">Connecting a key is not set up on this server yet.</p>
@@ -89,10 +89,6 @@ trackPages.get('/track', async (c) => {
           </p>
         ) : (
           <form class="track" id="track-form" autocomplete="off">
-            <label>
-              Prosperous Universe username
-              <input name="username" required maxlength={64} />
-            </label>
             <label>
               FIO API key
               <input name="apiKey" type="password" required maxlength={200} autocomplete="off" />

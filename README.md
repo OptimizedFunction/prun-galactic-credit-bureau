@@ -51,8 +51,9 @@ local database; stop `npm run dev` first).
 The sync runs hourly as a cron trigger. It reads each tracked lender's loan contracts from FIO using:
 
 - the lender's own FIO API key, if they connected one on the Track my loans page (stored encrypted with
-  `FIO_KEY_SECRET`), or otherwise
-- `FIO_API_KEY`, a bureau FIO account that the lender granted contract permission to (optional).
+  `FIO_KEY_SECRET`). This is the intended route for every lender.
+- otherwise `FIO_API_KEY`, an account the lender granted contract permission to. This is a fallback for
+  lenders who have not switched over yet, and can be removed once they all have.
 
 Set `FIO_KEY_SECRET` to any long random string in `.dev.vars`. Do not change it once keys are stored: they
 become unreadable and lenders have to connect again.

@@ -7,7 +7,7 @@ import * as lenderKeys from './db/lenderKeys';
 import * as q from './db/queries';
 import { isCurrency, isStatus, normalizeContractId } from './lib/normalize';
 import { seal } from './lib/secretbox';
-import { fetchKeyOwner, fetchLoanContracts } from './sync/fio';
+import { fetchKeyOwner, fetchLoanContracts, fetchUser } from './sync/fio';
 import { extractLoan } from './sync/plan';
 import { runSync } from './sync/run';
 import type { Env } from './env';
@@ -230,12 +230,10 @@ api.post('/fio-keys', async (c) => {
   const secret = c.env.FIO_KEY_SECRET;
   if (!secret) throw new ApiError(503, 'unavailable', 'Connecting a FIO key is not set up on this server.');
   const body = await jsonBody(c);
-  const username = typeof body['username'] === 'string' ? body['username'].trim() : '';
   const apiKey = typeof body['apiKey'] === 'string' ? body['apiKey'].trim() : '';
-  if (username.length < 1 || username.length > 64) throw new ApiError(400, 'bad_request', 'Enter your Prosperous Universe username.');
   if (apiKey.length < 8 || apiKey.length > 200 || /\s/.test(apiKey)) throw new ApiError(400, 'bad_request', 'That does not look like a FIO API key.');
 
-  // The key must belong to the username given: FIO says whose key it is.
+  // FIO says whose key this is, so the lender never types (or mistypes) a username.
   let owner: string | null;
   try {
     owner = await fetchKeyOwner(apiKey);
@@ -243,18 +241,16 @@ api.post('/fio-keys', async (c) => {
     throw new ApiError(502, 'fio_unreachable', 'Could not reach FIO to check the key. Try again in a minute.');
   }
   if (owner === null) throw new ApiError(400, 'bad_request', 'FIO does not recognise that API key. Check you copied all of it.');
-  if (owner.toLowerCase() !== username.toLowerCase()) {
-    throw new ApiError(400, 'bad_request', `That key belongs to the FIO account ${owner}, not ${username}.`);
-  }
 
-  // Keep an existing lender's spelling; otherwise use the one typed (FIO only gives upper case).
-  const existing = await q.getLender(c.env.DB, username);
-  const name = existing?.username ?? username;
+  // FIO names the key's owner in upper case; their profile has the real capitalisation and company code.
+  // An existing lender keeps the spelling already on record.
+  const [existing, profile] = await Promise.all([q.getLender(c.env.DB, owner), fetchUser(apiKey, owner)]);
+  const name = existing?.username ?? profile?.username ?? owner;
   const fetched = await fetchLoanContracts(apiKey, name);
   if (fetched.contracts === null) throw new ApiError(502, 'fio_unreachable', `FIO would not return this account's loan contracts (${fetched.error}).`);
   const loansFound = fetched.contracts.filter((contract) => typeof extractLoan(contract) !== 'string').length;
 
-  await lenderKeys.connectLender(c.env.DB, name, await seal(apiKey, secret), user);
+  await lenderKeys.connectLender(c.env.DB, name, await seal(apiKey, secret), user, { companyCode: profile?.companyCode });
   // Bring their loans in straight away instead of waiting for the hourly run.
   c.executionCtx.waitUntil(runSync(c.env.DB, { bureauKey: c.env.FIO_API_KEY, keySecret: secret }).catch((err) => console.error('Sync after connecting a key failed', err)));
 
