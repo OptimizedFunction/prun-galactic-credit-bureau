@@ -27,7 +27,9 @@ function contract(id: string, status: string, over: Partial<FioContract> = {}, w
         Party: 'CUSTOMER',
         Amount: 2600,
         Currency: 'AIC',
-        DeadlineEpochMs: ISSUED + (i + 1) * WEEK,
+        DeadlineDurationMs: WEEK,
+        // FIO gives a deadline date only for the installment currently due.
+        DeadlineEpochMs: i === 0 ? ISSUED + WEEK : null,
         ConditionIndex: i + 1,
       })),
     ],
@@ -65,6 +67,15 @@ test('extractLoan reads a lender-side loan', () => {
   assert.equal(l.durationWeeks, 4);
   assert.equal(l.status, 'in_progress');
   assert.equal(l.partnerName, 'Acme Mining');
+});
+
+test('duration is the sum of installment intervals, with a fallback for contracts that lack them', () => {
+  const noIntervals = contract('C', 'PARTIALLY_FULFILLED', {}, 10);
+  noIntervals.Conditions.forEach((c) => delete c.DeadlineDurationMs);
+  assert.equal((extractLoan(noIntervals) as FioLoan).durationWeeks, 10);
+  assert.equal(loan('C', 'PARTIALLY_FULFILLED', {}, 23).durationWeeks, 23);
+  const noInstallments = contract('C', 'PARTIALLY_FULFILLED', {}, 0);
+  assert.equal((extractLoan(noInstallments) as FioLoan).durationWeeks, null);
 });
 
 test('extractLoan skips loans received, non-loans and offers that never went live', () => {

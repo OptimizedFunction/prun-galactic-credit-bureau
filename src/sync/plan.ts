@@ -57,14 +57,14 @@ export function extractLoan(contract: FioContract): FioLoan | Skip {
     return 'unusable';
   }
 
-  // Duration: from the contract date to the last installment's deadline.
+  // Duration: installments run one after another, each with its own interval (DeadlineDurationMs), so the
+  // term is their sum. FIO only fills in a deadline date for the installment currently due. Older cached
+  // contracts have no intervals at all; those use the interval of a sibling installment, or one week.
   const installments = conditions.filter((c) => c.Type === 'LOAN_INSTALLMENT');
-  const deadlines = installments.map((c) => c.DeadlineEpochMs ?? c.DueDateEpochMs).filter((d): d is number => typeof d === 'number');
-  const durations = installments.map((c) => c.DeadlineDurationMs).filter((d): d is number => typeof d === 'number');
-  let durationMs: number | null = null;
-  if (deadlines.length > 0) durationMs = Math.max(...deadlines) - contract.DateEpochMs;
-  else if (durations.length > 0) durationMs = Math.max(...durations);
-  const durationWeeks = durationMs !== null && durationMs >= 0 ? Math.round((durationMs / WEEK_MS) * 10_000) / 10_000 : null;
+  const intervals = installments.map((c) => (typeof c.DeadlineDurationMs === 'number' && c.DeadlineDurationMs > 0 ? c.DeadlineDurationMs : null));
+  const fallbackInterval = intervals.find((i) => i !== null) ?? WEEK_MS;
+  const durationMs = intervals.reduce<number>((sum, i) => sum + (i ?? fallbackInterval), 0);
+  const durationWeeks = installments.length > 0 ? Math.round((durationMs / WEEK_MS) * 10_000) / 10_000 : null;
 
   return {
     contractId,

@@ -1,6 +1,6 @@
 // Thin client for FIO (https://rest.fnar.net), the community API that caches game data.
-// FIO publishes no payload schema, so the field names below come from payloads seen in the old sheet script.
-// Everything FIO-shaped is confined to this file and extract.ts.
+// FIO publishes no payload schema; the fields below were checked against live responses (2026-11-17).
+// Everything FIO-shaped is confined to this file and plan.ts.
 
 const FIO_BASE = 'https://rest.fnar.net';
 const TIMEOUT_MS = 20_000;
@@ -11,11 +11,16 @@ export interface FioCondition {
   Type: string;
   Party: string;
   Status?: string | null;
+  /** Set on LOAN_PAYOUT (the principal). Installments use the three amounts below instead. */
   Amount?: number | null;
   Currency?: string | null;
+  InterestAmount?: number | null;
+  RepaymentAmount?: number | null;
+  TotalAmount?: number | null;
+  /** Time allowed once the previous condition is fulfilled. Missing on older cached contracts. */
   DeadlineDurationMs?: number | null;
+  /** Only set on the condition that is currently due. */
   DeadlineEpochMs?: number | null;
-  DueDateEpochMs?: number | null;
   ConditionIndex?: number | null;
 }
 
@@ -27,7 +32,11 @@ export interface FioContract {
   /** The other side's company name. */
   PartnerName: string;
   PartnerCompanyCode?: string | null;
+  Name?: string | null;
+  Preamble?: string | null;
   DateEpochMs: number;
+  /** Deadline of the condition currently due, if any. */
+  DueDateEpochMs?: number | null;
   Conditions: FioCondition[];
 }
 
