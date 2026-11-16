@@ -10,6 +10,10 @@ info:
 
     **Reading needs no key.** Responses are cached for 60 seconds.
 
+    **Editing** needs a Discord sign-in (a session cookie set by `/auth/login`) and must come from this site.
+    Any signed-in user may edit any loan. Every change is recorded with who made it; see `/changes`.
+    Loans with `autoTrack` on follow FIO: only `notes` and `autoTrack` can be changed on them, and they cannot be deleted.
+
     **Reporting** (marked *planned*) will need a per-lender API key and is not implemented yet.
 
     Conventions:
@@ -26,6 +30,8 @@ tags:
   - name: Lenders
   - name: Loans
   - name: Bureau
+  - name: Editing
+    description: Needs a Discord sign-in.
   - name: Reporting
     description: Planned. Not implemented yet.
 
@@ -199,6 +205,25 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /loans:
+    post:
+      tags: [Editing]
+      summary: Add a loan
+      description: Adds a manual entry, labelled `community_edited`. Lender and borrower are created if new.
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LoanEdit'
+                - required: [lender, borrower, principal, issuedOn, status]
+      responses:
+        '201': { $ref: '#/components/responses/EditedLoan' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
     get:
       tags: [Loans]
       summary: List loans
@@ -215,7 +240,104 @@ paths:
         '200': { $ref: '#/components/responses/LoanPage' }
         '400': { $ref: '#/components/responses/Error' }
 
+  /loans/{id}/restore:
+    post:
+      tags: [Editing]
+      summary: Restore a deleted loan
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200': { $ref: '#/components/responses/EditedLoan' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /changes:
+    get:
+      tags: [Bureau]
+      summary: Recent changes to loans, newest first
+      parameters:
+        - name: system
+          in: query
+          description: Set to 1 to include automatic changes made by the FIO sync.
+          schema: { type: string, enum: ['1'] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of changes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [changes, limit, offset]
+                properties:
+                  changes:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Revision'
+                        - type: object
+                          required: [loanId, contractId, lender, borrower, loanDeleted, loanTracked]
+                          properties:
+                            loanId: { type: integer }
+                            contractId: { type: [string, 'null'] }
+                            lender: { type: string }
+                            borrower: { type: string }
+                            loanDeleted: { type: boolean }
+                            loanTracked: { type: boolean }
+                  limit: { type: integer }
+                  offset: { type: integer }
+
   /loans/{id}:
+    patch:
+      tags: [Editing]
+      summary: Edit a loan
+      description: Send only the fields to change. Sending current values changes nothing and records nothing.
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanEdit' }
+      responses:
+        '200':
+          description: The loan after the edit, and which fields changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan, changed]
+                properties:
+                  loan: { $ref: '#/components/schemas/Loan' }
+                  changed:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409':
+          description: The loan is tracked from FIO, is deleted, or the contract ID is already used.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Editing]
+      summary: Delete a loan
+      description: Hides the loan from lists and totals. It keeps its history and can be restored. Tracked loans cannot be deleted.
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/LoanId'
+      responses:
+        '200': { $ref: '#/components/responses/EditedLoan' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
     get:
       tags: [Loans]
       summary: One loan with its status history and version history
@@ -312,12 +434,22 @@ paths:
 
 components:
   securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Set by signing in with Discord at `/auth/login`.
     lenderKey:
       type: http
       scheme: bearer
       description: Per-lender API key, issued after Discord sign-in. Planned.
 
   parameters:
+    LoanId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
     Username:
       name: username
       in: path
@@ -346,6 +478,15 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    EditedLoan:
+      description: The loan after the change.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [loan]
+            properties:
+              loan: { $ref: '#/components/schemas/Loan' }
     LoanPage:
       description: A page of loans.
       content:
@@ -420,7 +561,7 @@ components:
       type: object
       required:
         [id, contractId, lender, borrower, principal, currency, issuedOn, durationWeeks, maturesOn, loanType, status,
-         everBreached, outstanding, notes, trust, source, autoTrack, lastSyncedAt, updatedAt]
+         everBreached, outstanding, notes, trust, source, autoTrack, lastSyncedAt, updatedAt, deletedAt]
       properties:
         id: { type: integer, description: Bureau loan ID. }
         contractId: { type: [string, 'null'], description: In-game contract ID; null for entries without one. }
@@ -454,6 +595,24 @@ components:
         autoTrack: { type: boolean, description: True if the FIO sync keeps this loan up to date. }
         lastSyncedAt: { type: [string, 'null'], format: date-time }
         updatedAt: { type: string, format: date-time }
+        deletedAt: { type: [string, 'null'], format: date-time, description: Set when the loan has been deleted. }
+
+    LoanEdit:
+      type: object
+      additionalProperties: false
+      properties:
+        lender: { type: string, maxLength: 64 }
+        borrower: { type: string, maxLength: 64 }
+        companyCode: { type: [string, 'null'], maxLength: 8 }
+        corpCode: { type: [string, 'null'], maxLength: 8 }
+        principal: { type: string, description: 'A number; thousands separators are accepted, e.g. "25,000,000".' }
+        currency: { type: [string, 'null'], description: 'AIC, CIS, ICA, NCC, or null / "N/A" for non-cash.' }
+        issuedOn: { type: string, format: date }
+        durationWeeks: { type: [number, string, 'null'] }
+        status: { type: string, description: 'A status key or its label, e.g. "in_progress" or "In Progress".' }
+        contractId: { type: [string, 'null'] }
+        autoTrack: { type: boolean, description: Needs a contract ID. }
+        notes: { type: [string, 'null'], maxLength: 2000 }
 
     LoanReport:
       type: object
@@ -508,12 +667,13 @@ components:
 
     Revision:
       type: object
-      required: [id, action, actorType, actor, before, after, createdAt]
+      required: [id, action, actorType, actor, actorId, before, after, createdAt]
       properties:
         id: { type: integer }
         action: { type: string, enum: [import, create, update, delete] }
         actorType: { type: string, enum: [system, lender, user] }
-        actor: { type: string }
+        actor: { type: string, description: 'Discord username, or the name of the system job.' }
+        actorId: { type: [string, 'null'], description: Discord user ID; null for system changes. }
         before: { description: Values before the change; null for the first version. }
         after: { description: Values after the change. }
         createdAt: { type: string, format: date-time }
@@ -546,5 +706,5 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, internal_error] }
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, internal_error] }
             message: { type: string }

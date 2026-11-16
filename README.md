@@ -19,7 +19,8 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | Import of the existing sheet, checked against its Summary tab | Done |
 | Read API (`/api/v1`) and public pages | Done |
 | Automatic sync from FIO | Done; run against live FIO locally |
-| Lender API keys, reporting, public editing, Discord sign-in | Not started |
+| Community editing (ledger page, Discord sign-in, change log with undo) | Done; sign-in itself not yet tried with a real Discord account |
+| Lender API keys and the report endpoint | Not started |
 | Deployment | Not started (runs locally only) |
 
 ## Run it locally
@@ -55,6 +56,16 @@ on the Sync health page.
 To import a copy of the sheet instead, set `SHEET_ID` (and `SHEET_GIDS` if the tab IDs differ, e.g.
 `{"status-history":123,"lender-sync":456}`).
 
+## Editing
+
+Anyone who signs in with Discord can add, edit and delete loans on the Ledger page. Every change is recorded
+with the editor's Discord username and ID, shown on the Recent changes page, and can be undone there. Loans
+the FIO sync manages (Auto track ticked) only accept edits to their notes, and cannot be deleted.
+
+Sign-in needs a Discord application: put its client ID and secret in `.dev.vars`, and add
+`http://localhost:8787/auth/callback` and `http://127.0.0.1:8787/auth/callback` as redirect URLs in the
+Discord developer portal.
+
 ## API
 
 The contract is [openapi.yaml](openapi.yaml). Examples:
@@ -67,6 +78,7 @@ GET /api/v1/loans?contractId={id}
 GET /api/v1/loans/{id}                  with status history and version history
 GET /api/v1/leaderboards
 GET /api/v1/sync
+GET /api/v1/changes
 ```
 
 ## How figures are defined
@@ -84,7 +96,10 @@ openapi.yaml     API contract
 src/index.tsx    Worker entry (Hono)
 src/api.ts       JSON API
 src/pages.tsx    Server-rendered pages
-src/db/          Database queries
+src/ledger.tsx   Editable ledger and Recent changes pages
+src/auth.ts      Discord sign-in and the signed session cookie
+assets/          Logo and the ledger's browser script
+src/db/          Database queries and edits
 src/sync/        FIO sync: client, decision rules, database writes
 src/lib/         Shared pure helpers (amounts, IDs, statuses)
 scripts/         Sheet download, import and verification
