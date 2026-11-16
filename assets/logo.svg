@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PrUn Galactic Credit Bureau">
   <rect width="64" height="64" rx="14" fill="#101a33"/>
-  <ellipse cx="32" cy="32" rx="27" ry="9" transform="rotate(-20 32 32)" fill="none" stroke="#8fb4ff" stroke-width="4"/>
-  <circle cx="32" cy="32" r="16" fill="#f2b84b"/>
-  <path d="M24.5 27.5l5.5 5.5 10-11.5" fill="none" stroke="#101a33" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M5 32A27 9 0 0 0 59 32" transform="rotate(-20 32 32)" fill="none" stroke="#8fb4ff" stroke-width="4" stroke-linecap="round"/>
+  <g fill="none" stroke-linecap="round">
+    <!-- planetary ring, far side -->
+    <path d="M62 32A30 10 0 0 0 2 32" transform="rotate(-20 32 32)" stroke="#8fb4ff" stroke-width="3"/>
+    <!-- coin: hides the far side of the ring -->
+    <circle cx="32" cy="32" r="18" fill="#101a33" stroke="#f2b84b" stroke-width="3"/>
+    <!-- C with = through its centre -->
+    <path d="M37.7 26.3A8 8 0 1 0 37.7 37.7" stroke="#f2b84b" stroke-width="3.2"/>
+    <path d="M21.5 30h19M21.5 34h19" stroke="#f2b84b" stroke-width="2.4"/>
+    <!-- planetary ring, near side -->
+    <path d="M2 32A30 10 0 0 0 62 32" transform="rotate(-20 32 32)" stroke="#8fb4ff" stroke-width="3"/>
+  </g>
 </svg>
