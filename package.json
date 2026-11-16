@@ -7,7 +7,9 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "typecheck": "tsc --noEmit"
+    "db:migrate": "wrangler d1 migrations apply bureau --local",
+    "typecheck": "tsc --noEmit",
+    "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate"
   },
   "dependencies": {
     "hono": "^4.13.19"
