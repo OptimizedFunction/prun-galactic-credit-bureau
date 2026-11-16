@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { api } from './api';
+import { auth } from './auth';
 import { notFoundPage, pages } from './pages';
 import { runSync } from './sync/run';
 import type { Env } from './env';
@@ -7,6 +8,7 @@ import type { Env } from './env';
 const app = new Hono<{ Bindings: Env }>();
 
 app.route('/api/v1', api);
+app.route('/auth', auth);
 app.route('/', pages);
 
 app.notFound((c) => {
