@@ -1,6 +1,8 @@
-// Public read API, mounted at /api/v1. No key needed. The contract is openapi.yaml.
+// Public API, mounted at /api/v1. Reading needs no key; editing needs a Discord sign-in. The contract is openapi.yaml.
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { currentUser, type SessionUser } from './auth';
+import * as edits from './db/edits';
 import * as q from './db/queries';
 import { isCurrency, isStatus, normalizeContractId } from './lib/normalize';
 import type { Env } from './env';
@@ -9,7 +11,7 @@ export const api = new Hono<{ Bindings: Env }>();
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 404,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 415,
     readonly code: string,
     message: string,
   ) {
@@ -33,6 +35,10 @@ api.use('*', async (c, next) => {
 
 api.onError((err, c) => {
   if (err instanceof ApiError) return json({ error: { code: err.code, message: err.message } }, err.status);
+  if (err instanceof edits.EditError) {
+    const status = err.kind === 'invalid' ? 400 : err.kind === 'not_found' ? 404 : 409;
+    return json({ error: { code: err.kind === 'invalid' ? 'bad_request' : err.kind, message: err.message } }, status);
+  }
   console.error(err);
   return json({ error: { code: 'internal_error', message: 'Something went wrong.' } }, 500);
 });
@@ -116,3 +122,64 @@ api.get('/loans/:id', async (c) => {
 api.get('/leaderboards', async (c) => json({ leaderboards: await q.getLeaderboards(c.env.DB) }));
 
 api.get('/sync', async (c) => json({ lenders: await q.getSyncHealth(c.env.DB) }));
+
+// ---- Editing (signed-in users) ----
+
+type Ctx = Parameters<typeof currentUser>[0];
+
+/** Requires a signed-in user and a same-origin JSON request (the session is a cookie, so cross-site writes are refused). */
+async function editor(c: Ctx): Promise<SessionUser> {
+  const origin = c.req.header('Origin');
+  if (origin && origin !== new URL(c.req.url).origin) throw new ApiError(403, 'forbidden', 'Edits must come from this site.');
+  const user = await currentUser(c);
+  if (!user) throw new ApiError(401, 'unauthorized', 'Sign in with Discord to edit.');
+  return user;
+}
+
+async function jsonBody(c: Ctx): Promise<Record<string, unknown>> {
+  if (!(c.req.header('Content-Type') ?? '').toLowerCase().startsWith('application/json')) {
+    throw new ApiError(415, 'bad_request', 'Send JSON (Content-Type: application/json).');
+  }
+  const body: unknown = await c.req.json().catch(() => null);
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new ApiError(400, 'bad_request', 'The request body must be a JSON object.');
+  return body as Record<string, unknown>;
+}
+
+function loanId(c: Ctx): number {
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id) || id < 1) throw new ApiError(400, 'bad_request', 'Loan ID must be a positive whole number.');
+  return id;
+}
+
+api.post('/loans', async (c) => {
+  const user = await editor(c);
+  const id = await edits.createLoan(c.env.DB, edits.parseLoanFields(await jsonBody(c)), user);
+  return json({ loan: await q.getLoan(c.env.DB, id) }, 201);
+});
+
+api.patch('/loans/:id', async (c) => {
+  const user = await editor(c);
+  const id = loanId(c);
+  const changed = await edits.updateLoan(c.env.DB, id, edits.parseLoanFields(await jsonBody(c)), user);
+  return json({ loan: await q.getLoan(c.env.DB, id), changed });
+});
+
+api.delete('/loans/:id', async (c) => {
+  const user = await editor(c);
+  const id = loanId(c);
+  await edits.deleteLoan(c.env.DB, id, user);
+  return json({ loan: await q.getLoan(c.env.DB, id) });
+});
+
+api.post('/loans/:id/restore', async (c) => {
+  const user = await editor(c);
+  const id = loanId(c);
+  await edits.restoreLoan(c.env.DB, id, user);
+  return json({ loan: await q.getLoan(c.env.DB, id) });
+});
+
+api.get('/changes', async (c) => {
+  const { limit, offset } = paging(c.req.query());
+  const changes = await q.listChanges(c.env.DB, { includeSystem: c.req.query('system') === '1', limit, offset });
+  return json({ changes, limit, offset });
+});
