@@ -20,7 +20,8 @@ const LEDGER_CSS = `
 #ledger td { padding: 5px 12px; }
 #ledger td[tabindex] { cursor: cell; }
 #ledger td[tabindex]:hover, #ledger td[tabindex]:focus { outline: 2px solid var(--link); outline-offset: -2px; }
-#ledger td.locked { color: var(--muted); }
+#ledger td.locked, #ledger td.readonly { color: var(--muted); }
+#ledger td.tr-fio_verified { color: var(--good); }
 #ledger tr td { transition: background-color 1.5s; }
 #ledger tr.flash td { background-color: color-mix(in srgb, var(--link) 22%, transparent); transition: none; }
 #ledger td input:not([type=checkbox]), #ledger td select { width: 100%; min-width: 90px; padding: 3px 6px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--link); border-radius: 4px; }
@@ -60,6 +61,7 @@ ledgerPages.get('/ledger', async (c) => {
       contractId: l.contractId,
       autoTrack: l.autoTrack,
       notes: l.notes,
+      trust: l.trust,
     })),
   };
   // "<" is escaped so loan text can never close the script element.
@@ -80,7 +82,7 @@ ledgerPages.get('/ledger', async (c) => {
           </>
         )}{' '}
         Loans with Auto track ticked are kept up to date from FIO: only their Notes can be edited unless you untick it. Other people's changes
-        appear here within about 30 seconds.
+        appear here within about 30 seconds. Trust is set by the bureau, not typed in: see <a href="/about">About</a>.
       </p>
       {user && (
         <details class="panel">

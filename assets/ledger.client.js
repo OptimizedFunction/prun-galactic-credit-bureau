@@ -19,8 +19,11 @@
     { f: 'status', label: 'Status', options: Object.entries(STATUS) },
     { f: 'contractId', label: 'Contract' },
     { f: 'autoTrack', label: 'Auto track', check: true },
+    // Set by the bureau: FIO-verified by the sync, Community-edited when someone changes a loan's facts.
+    { f: 'trust', label: 'Trust', readonly: true },
     { f: 'notes', label: 'Notes', wide: true },
   ];
+  const TRUST = { fio_verified: 'FIO-verified', lender_reported: 'Lender-reported', community_edited: 'Community-edited' };
   /** Cells that stay editable on a loan the FIO sync manages. */
   const TRACKED_EDITABLE = ['notes', 'autoTrack'];
 
@@ -49,9 +52,10 @@
     }
     if (col.f === 'durationWeeks') return String(Math.round(v * 100) / 100);
     if (col.f === 'status') return STATUS[v] ?? v;
+    if (col.f === 'trust') return TRUST[v] ?? v;
     return String(v);
   };
-  const canEdit = (loan, col) => Boolean(user) && (!loan.autoTrack || TRACKED_EDITABLE.includes(col.f));
+  const canEdit = (loan, col) => Boolean(user) && !col.readonly && (!loan.autoTrack || TRACKED_EDITABLE.includes(col.f));
 
   /** API loan -> the flat shape the ledger uses. */
   const flat = (l) => ({
@@ -68,6 +72,7 @@
     contractId: l.contractId,
     autoTrack: l.autoTrack,
     notes: l.notes,
+    trust: l.trust,
   });
 
   let msgTimer;
@@ -116,7 +121,10 @@
       } else {
         td.textContent = shown(loan, col);
         text.push(td.textContent);
-        if (canEdit(loan, col)) td.tabIndex = 0;
+        if (col.readonly) {
+          td.classList.add('readonly', 'tr-' + loan.trust);
+          td.title = 'Set by the bureau. It changes when a loan is edited or checked against FIO.';
+        } else if (canEdit(loan, col)) td.tabIndex = 0;
         else if (user) {
           td.classList.add('locked');
           td.title = 'Kept up to date from FIO. Untick Auto track to edit.';
