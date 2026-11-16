@@ -8,6 +8,8 @@ export interface SessionUser {
   id: string;
   /** Discord username. */
   name: string;
+  /** Discord avatar hash, if the account has a profile picture. */
+  avatar?: string | null;
 }
 
 const SESSION_COOKIE = 'session';
@@ -26,7 +28,7 @@ async function signingKey(secret: string): Promise<CryptoKey> {
 }
 
 export async function signSession(user: SessionUser, secret: string, now = Date.now()): Promise<string> {
-  const payload = b64url(encoder.encode(JSON.stringify({ id: user.id, name: user.name, exp: now + SESSION_DAYS * 86_400_000 })));
+  const payload = b64url(encoder.encode(JSON.stringify({ id: user.id, name: user.name, avatar: user.avatar ?? null, exp: now + SESSION_DAYS * 86_400_000 })));
   const signature = await crypto.subtle.sign('HMAC', await signingKey(secret), encoder.encode(payload));
   return `${payload}.${b64url(new Uint8Array(signature))}`;
 }
@@ -38,9 +40,9 @@ export async function readSession(cookie: string | undefined, secret: string, no
   try {
     const valid = await crypto.subtle.verify('HMAC', await signingKey(secret), fromB64url(signature), encoder.encode(payload));
     if (!valid) return null;
-    const data = JSON.parse(new TextDecoder().decode(fromB64url(payload))) as { id?: unknown; name?: unknown; exp?: unknown };
+    const data = JSON.parse(new TextDecoder().decode(fromB64url(payload))) as { id?: unknown; name?: unknown; avatar?: unknown; exp?: unknown };
     if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.exp !== 'number' || data.exp < now) return null;
-    return { id: data.id, name: data.name };
+    return { id: data.id, name: data.name, avatar: typeof data.avatar === 'string' ? data.avatar : null };
   } catch {
     return null;
   }
@@ -53,6 +55,9 @@ export async function currentUser(c: Ctx): Promise<SessionUser | null> {
   const secret = c.env.DISCORD_CLIENT_SECRET;
   return secret ? readSession(getCookie(c, SESSION_COOKIE), secret) : null;
 }
+
+/** Discord avatar hashes are 32 hex characters, prefixed a_ when animated. Anything else is dropped. */
+const avatarHash = (value: unknown): string | null => (typeof value === 'string' && /^(a_)?[0-9a-f]{32}$/.test(value) ? value : null);
 
 /** Only same-site relative paths are accepted as a place to return to after sign-in. */
 const safeReturn = (path: string | undefined): string => (path && /^\/(?![/\\])/.test(path) ? path : '/');
@@ -108,10 +113,10 @@ auth.get('/callback', async (c) => {
   }
   const { access_token: accessToken } = (await tokenRes.json()) as { access_token?: string };
   const meRes = await fetch('https://discord.com/api/users/@me', { headers: { Authorization: `Bearer ${accessToken}` } });
-  const me = (await meRes.json()) as { id?: string; username?: string };
+  const me = (await meRes.json()) as { id?: string; username?: string; avatar?: string | null };
   if (!meRes.ok || !me.id || !me.username) return c.text('Could not read your Discord account. Try again.', 502);
 
-  setCookie(c, SESSION_COOKIE, await signSession({ id: me.id, name: me.username }, clientSecret), {
+  setCookie(c, SESSION_COOKIE, await signSession({ id: me.id, name: me.username, avatar: avatarHash(me.avatar) }, clientSecret), {
     httpOnly: true,
     secure: url.protocol === 'https:',
     sameSite: 'Lax',
@@ -128,5 +133,8 @@ auth.post('/logout', (c) => {
 
 auth.get('/me', async (c) => {
   c.header('Cache-Control', 'no-store');
-  return c.json({ user: await currentUser(c), signInAvailable: Boolean(c.env.DISCORD_CLIENT_ID && c.env.DISCORD_CLIENT_SECRET) });
+  const user = await currentUser(c);
+  // The picture is served by Discord's CDN; the page falls back to an initial if it fails to load.
+  const avatarUrl = user?.avatar && /^\d+$/.test(user.id) ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : null;
+  return c.json({ user: user ? { id: user.id, name: user.name, avatarUrl } : null, signInAvailable: Boolean(c.env.DISCORD_CLIENT_ID && c.env.DISCORD_CLIENT_SECRET) });
 });

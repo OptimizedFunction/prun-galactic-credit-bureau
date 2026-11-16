@@ -45,6 +45,7 @@ header.site details.user summary { display: flex; align-items: center; gap: 8px;
 header.site details.user summary::-webkit-details-marker { display: none; }
 header.site details.user summary::after { content: "▾"; color: #aebbd6; font-size: 12px; }
 header.site details.user summary:hover, header.site details.user[open] summary { background: rgba(255, 255, 255, .07); border-color: #3d5490; }
+header.site img.avatar { object-fit: cover; }
 header.site .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #101a33; background: #f2b84b; font-size: 13px; font-weight: 700; text-transform: uppercase; }
 header.site .uname { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header.site .menu { position: absolute; right: 0; top: calc(100% - 6px); display: grid; min-width: 210px; padding: 6px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .3); }
@@ -123,7 +124,18 @@ const AUTH_SCRIPT = `(function () {
     }
     var menu = node('details', 'user');
     var summary = node('summary');
-    summary.append(node('span', 'avatar', d.user.name.slice(0, 1)), node('span', 'uname', d.user.name));
+    var initial = node('span', 'avatar', d.user.name.slice(0, 1));
+    var face = initial;
+    if (d.user.avatarUrl) {
+      face = node('img', 'avatar');
+      face.src = d.user.avatarUrl;
+      face.alt = '';
+      face.width = 28;
+      face.height = 28;
+      face.referrerPolicy = 'no-referrer';
+      face.onerror = function () { face.replaceWith(initial); };
+    }
+    summary.append(face, node('span', 'uname', d.user.name));
     var panel = node('div', 'menu');
     var track = node('a', '', 'Track my loans');
     track.href = '/track';

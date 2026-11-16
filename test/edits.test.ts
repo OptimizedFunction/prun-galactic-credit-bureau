@@ -124,7 +124,9 @@ test('deleting hides a loan from lists and totals, and it can be restored', asyn
 test('sessions are signed: tampered, foreign and expired cookies are rejected', async () => {
   const now = Date.parse('2026-11-17T00:00:00Z');
   const cookie = await signSession(ANN, 'secret-a', now);
-  assert.deepEqual(await readSession(cookie, 'secret-a', now), ANN);
+  assert.deepEqual(await readSession(cookie, 'secret-a', now), { ...ANN, avatar: null });
+  const withFace = await signSession({ ...ANN, avatar: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' }, 'secret-a', now);
+  assert.equal((await readSession(withFace, 'secret-a', now))!.avatar, 'a1b2c3d4e5f60718293a4b5c6d7e8f90');
 
   assert.equal(await readSession(cookie, 'secret-b', now), null, 'signed with another key');
   assert.equal(await readSession(cookie, 'secret-a', now + 31 * 86_400_000), null, 'expired');
