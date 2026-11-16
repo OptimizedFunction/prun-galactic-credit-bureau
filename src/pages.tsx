@@ -377,7 +377,9 @@ pages.get('/lenders', async (c) => {
   return c.html(
     <Layout title="Lenders">
       <h1>Lenders</h1>
-      <p class="sub">Everyone who has lent, and what each has out on loan today in each currency.</p>
+      <p class="sub">
+        Everyone who has lent, and what each has out on loan today in each currency. Lend yourself? <a href="/track">Track your loans automatically</a>.
+      </p>
       <div class="scroll">
         <table>
           <thead>
@@ -630,7 +632,9 @@ pages.get('/sync', async (c) => {
   return c.html(
     <Layout title="Sync health">
       <h1>Sync health</h1>
-      <p class="sub">When each automatically tracked lender was last read from FIO, and how it went.</p>
+      <p class="sub">
+        When each automatically tracked lender was last read from FIO, and how it went. <a href="/track">Add yourself</a>.
+      </p>
       <div class="scroll">
         <table>
           <thead>
@@ -652,7 +656,7 @@ pages.get('/sync', async (c) => {
                   {h.ok ? (
                     <span class="badge good">OK</span>
                   ) : (
-                    <span class="badge bad">{h.httpStatus === 401 ? 'No FIO permission (401)' : (h.error ?? 'Failed')}</span>
+                    <span class="badge bad">{h.error ?? (h.httpStatus === 401 ? 'No FIO permission' : 'Failed')}</span>
                   )}
                 </td>
                 <td class="num">{h.contractsReturned ?? '–'}</td>
@@ -701,6 +705,11 @@ pages.get('/about', (c) =>
           <dt>Community-edited</dt>
           <dd>Entered or changed by someone else. See the loan's version history.</dd>
         </dl>
+        <h2>Automatic tracking</h2>
+        <p>
+          Lenders can <a href="/track">connect their FIO account</a>. The bureau then reads their loan contracts every hour and keeps each loan's
+          status current without anyone typing it in.
+        </p>
         <h2>Editing</h2>
         <p>
           Sign in with Discord and you can add, correct or remove any loan in the <a href="/ledger">ledger</a>. Each change is recorded under your

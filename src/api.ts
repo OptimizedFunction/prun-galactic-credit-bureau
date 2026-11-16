@@ -3,15 +3,20 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { currentUser, type SessionUser } from './auth';
 import * as edits from './db/edits';
+import * as lenderKeys from './db/lenderKeys';
 import * as q from './db/queries';
 import { isCurrency, isStatus, normalizeContractId } from './lib/normalize';
+import { seal } from './lib/secretbox';
+import { fetchKeyOwner, fetchLoanContracts } from './sync/fio';
+import { extractLoan } from './sync/plan';
+import { runSync } from './sync/run';
 import type { Env } from './env';
 
 export const api = new Hono<{ Bindings: Env }>();
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 415,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 415 | 502 | 503,
     readonly code: string,
     message: string,
   ) {
@@ -132,7 +137,7 @@ async function editor(c: Ctx): Promise<SessionUser> {
   const origin = c.req.header('Origin');
   if (origin && origin !== new URL(c.req.url).origin) throw new ApiError(403, 'forbidden', 'Edits must come from this site.');
   const user = await currentUser(c);
-  if (!user) throw new ApiError(401, 'unauthorized', 'Sign in with Discord to edit.');
+  if (!user) throw new ApiError(401, 'unauthorized', 'Sign in with Discord first.');
   return user;
 }
 
@@ -209,4 +214,55 @@ api.get('/updates', async (c) => {
   return new Response(JSON.stringify({ loans, cursor }, (key, value) => (key.endsWith('Minor') ? undefined : value)), {
     headers: { 'content-type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
   });
+});
+
+// ---- Lenders connecting their own FIO API key ----
+
+api.get('/fio-keys', async (c) => {
+  const user = await editor(c);
+  return new Response(JSON.stringify({ lenders: await lenderKeys.listConnectedBy(c.env.DB, user.id) }), {
+    headers: { 'content-type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
+});
+
+api.post('/fio-keys', async (c) => {
+  const user = await editor(c);
+  const secret = c.env.FIO_KEY_SECRET;
+  if (!secret) throw new ApiError(503, 'unavailable', 'Connecting a FIO key is not set up on this server.');
+  const body = await jsonBody(c);
+  const username = typeof body['username'] === 'string' ? body['username'].trim() : '';
+  const apiKey = typeof body['apiKey'] === 'string' ? body['apiKey'].trim() : '';
+  if (username.length < 1 || username.length > 64) throw new ApiError(400, 'bad_request', 'Enter your Prosperous Universe username.');
+  if (apiKey.length < 8 || apiKey.length > 200 || /\s/.test(apiKey)) throw new ApiError(400, 'bad_request', 'That does not look like a FIO API key.');
+
+  // The key must belong to the username given: FIO says whose key it is.
+  let owner: string | null;
+  try {
+    owner = await fetchKeyOwner(apiKey);
+  } catch {
+    throw new ApiError(502, 'fio_unreachable', 'Could not reach FIO to check the key. Try again in a minute.');
+  }
+  if (owner === null) throw new ApiError(400, 'bad_request', 'FIO does not recognise that API key. Check you copied all of it.');
+  if (owner.toLowerCase() !== username.toLowerCase()) {
+    throw new ApiError(400, 'bad_request', `That key belongs to the FIO account ${owner}, not ${username}.`);
+  }
+
+  // Keep an existing lender's spelling; otherwise use the one typed (FIO only gives upper case).
+  const existing = await q.getLender(c.env.DB, username);
+  const name = existing?.username ?? username;
+  const fetched = await fetchLoanContracts(apiKey, name);
+  if (fetched.contracts === null) throw new ApiError(502, 'fio_unreachable', `FIO would not return this account's loan contracts (${fetched.error}).`);
+  const loansFound = fetched.contracts.filter((contract) => typeof extractLoan(contract) !== 'string').length;
+
+  await lenderKeys.connectLender(c.env.DB, name, await seal(apiKey, secret), user);
+  // Bring their loans in straight away instead of waiting for the hourly run.
+  c.executionCtx.waitUntil(runSync(c.env.DB, { bureauKey: c.env.FIO_API_KEY, keySecret: secret }).catch((err) => console.error('Sync after connecting a key failed', err)));
+
+  return json({ lender: { username: name, trackingMode: 'fio' }, contractsFound: fetched.contracts.length, loansFound }, 201);
+});
+
+api.delete('/fio-keys/:username', async (c) => {
+  const user = await editor(c);
+  await lenderKeys.disconnectLender(c.env.DB, c.req.param('username'), user);
+  return json({ ok: true });
 });

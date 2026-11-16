@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { api } from './api';
 import { auth } from './auth';
 import { ledgerPages } from './ledger';
+import { trackPages } from './track';
 import { notFoundPage, pages } from './pages';
 import { runSync } from './sync/run';
 import type { Env } from './env';
@@ -11,6 +12,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.route('/api/v1', api);
 app.route('/auth', auth);
 app.route('/', ledgerPages);
+app.route('/', trackPages);
 app.route('/', pages);
 
 app.notFound((c) => {
@@ -23,6 +25,7 @@ app.notFound((c) => {
 export default {
   fetch: app.fetch,
 
+  /** Cron trigger (see wrangler.jsonc): pull every tracked lender's loans from FIO. */
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     if (!env.FIO_API_KEY && !env.FIO_KEY_SECRET) {
       console.warn('FIO sync skipped: neither FIO_API_KEY nor FIO_KEY_SECRET is set.');
