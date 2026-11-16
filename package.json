@@ -13,7 +13,8 @@
     "sheet:verify": "tsx scripts/verify-import.ts",
     "seed": "npm run db:migrate && npm run sheet:fetch && npm run sheet:import && npm run sheet:verify",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/normalize.test.ts",
+    "test": "tsx --test test/normalize.test.ts test/sync.test.ts",
+    "dev:cron": "wrangler dev --test-scheduled",
     "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate"
   },
   "dependencies": {

@@ -4,6 +4,8 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-04-01",
   "observability": { "enabled": true },
+  // FIO sync, hourly. To test locally: "npm run dev:cron", then open /__scheduled.
+  "triggers": { "crons": ["0 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",
