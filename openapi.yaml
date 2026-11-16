@@ -1,0 +1,550 @@
+openapi: 3.1.0
+info:
+  title: Prosperous Universe Credit Bureau API
+  version: 0.1.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: |
+    Public record of lending between Prosperous Universe players.
+
+    **Reading needs no key.** Responses are cached for 60 seconds.
+
+    **Reporting** (marked *planned*) will need a per-lender API key and is not implemented yet.
+
+    Conventions:
+    - Amounts are decimal strings (`"25000000.00"`) and always come with a currency. Amounts in
+      different currencies are never added together.
+    - `currency` is one of `AIC`, `CIS`, `ICA`, `NCC`, or `null` for lending that is not cash
+      (for example a loan repaid in materials).
+    - Usernames, company codes and contract IDs are case-insensitive.
+    - "Total" figures leave out terminated loans. "Current" is In Progress plus Overdue.
+servers:
+  - url: /api/v1
+tags:
+  - name: Borrowers
+  - name: Lenders
+  - name: Loans
+  - name: Bureau
+  - name: Reporting
+    description: Planned. Not implemented yet.
+
+paths:
+  /search:
+    get:
+      tags: [Borrowers]
+      summary: Find borrowers and lenders
+      description: Matches part of a username (current or former), or an exact company code.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+      responses:
+        '200':
+          description: Matches, up to 25 of each.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [borrowers, lenders]
+                properties:
+                  borrowers:
+                    type: array
+                    items:
+                      type: object
+                      required: [username, companyCode, corpCode, loans]
+                      properties:
+                        username: { type: string }
+                        companyCode: { type: [string, 'null'] }
+                        corpCode: { type: [string, 'null'] }
+                        loans: { type: integer }
+                  lenders:
+                    type: array
+                    items:
+                      type: object
+                      required: [username, loans]
+                      properties:
+                        username: { type: string }
+                        loans: { type: integer }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /borrowers/{username}:
+    get:
+      tags: [Borrowers]
+      summary: A borrower's record
+      description: Exposure per currency and every loan reported for this borrower (newest first, up to 500). Former usernames resolve to the current one.
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: The borrower's record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [borrower, exposure, loans]
+                properties:
+                  borrower: { $ref: '#/components/schemas/Borrower' }
+                  exposure:
+                    type: array
+                    items: { $ref: '#/components/schemas/Exposure' }
+                  loans:
+                    type: array
+                    items: { $ref: '#/components/schemas/Loan' }
+        '404':
+          description: No lender has reported a loan to this borrower.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /lenders:
+    get:
+      tags: [Lenders]
+      summary: All lenders with per-currency figures
+      responses:
+        '200':
+          description: Every lender.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lenders]
+                properties:
+                  lenders:
+                    type: array
+                    items:
+                      type: object
+                      required: [username, trackingMode, loans, exposure]
+                      properties:
+                        username: { type: string }
+                        trackingMode: { $ref: '#/components/schemas/TrackingMode' }
+                        loans: { type: integer, description: Cash loans only. }
+                        exposure:
+                          type: array
+                          items: { $ref: '#/components/schemas/Exposure' }
+
+  /lenders/{username}:
+    get:
+      tags: [Lenders]
+      summary: A lender's figures
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: The lender.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lender, exposure]
+                properties:
+                  lender: { $ref: '#/components/schemas/Lender' }
+                  exposure:
+                    type: array
+                    items: { $ref: '#/components/schemas/Exposure' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /lenders/{username}/loans:
+    get:
+      tags: [Lenders]
+      summary: A lender's loans
+      parameters:
+        - $ref: '#/components/parameters/Username'
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Currency'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200': { $ref: '#/components/responses/LoanPage' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /lenders/{username}/loans/{contractId}:
+    put:
+      tags: [Reporting]
+      summary: Report a loan (planned)
+      description: |
+        Creates or updates one of the lender's own loans. Idempotent by contract ID: sending the same
+        report twice changes nothing. The loan is labelled `lender_reported` until it has been checked against FIO.
+      security:
+        - lenderKey: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoanReport' }
+      responses:
+        '200':
+          description: The loan as stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan]
+                properties:
+                  loan: { $ref: '#/components/schemas/Loan' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403':
+          description: The key belongs to a different lender.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /loans:
+    get:
+      tags: [Loans]
+      summary: List loans
+      description: Newest first.
+      parameters:
+        - { name: lender, in: query, schema: { type: string } }
+        - { name: borrower, in: query, schema: { type: string } }
+        - { name: contractId, in: query, schema: { type: string }, description: In-game contract ID. }
+        - $ref: '#/components/parameters/Status'
+        - $ref: '#/components/parameters/Currency'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200': { $ref: '#/components/responses/LoanPage' }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /loans/{id}:
+    get:
+      tags: [Loans]
+      summary: One loan with its status history and version history
+      description: "`id` is the bureau's loan ID. To look up by in-game contract ID use `/loans?contractId=`."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The loan.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan, statusHistory, revisions]
+                properties:
+                  loan: { $ref: '#/components/schemas/Loan' }
+                  statusHistory:
+                    type: array
+                    items: { $ref: '#/components/schemas/StatusChange' }
+                  revisions:
+                    type: array
+                    items: { $ref: '#/components/schemas/Revision' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /leaderboards:
+    get:
+      tags: [Bureau]
+      summary: Top 20 lenders per currency
+      responses:
+        '200':
+          description: One board per currency.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [leaderboards]
+                properties:
+                  leaderboards:
+                    type: array
+                    items:
+                      type: object
+                      required: [currency, byTotal, byCurrent]
+                      properties:
+                        currency: { $ref: '#/components/schemas/Currency' }
+                        byTotal:
+                          description: By everything lent, all time.
+                          type: array
+                          items: { $ref: '#/components/schemas/LeaderboardEntry' }
+                        byCurrent:
+                          description: By what is out on loan now.
+                          type: array
+                          items: { $ref: '#/components/schemas/LeaderboardEntry' }
+
+  /stats:
+    get:
+      tags: [Bureau]
+      summary: Bureau-wide counts and per-currency totals
+      responses:
+        '200':
+          description: Totals.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loans, lenders, borrowers, exposure]
+                properties:
+                  loans: { type: integer }
+                  lenders: { type: integer }
+                  borrowers: { type: integer }
+                  exposure:
+                    type: array
+                    items: { $ref: '#/components/schemas/Exposure' }
+
+  /sync:
+    get:
+      tags: [Bureau]
+      summary: Latest FIO sync result for each automatically tracked lender
+      responses:
+        '200':
+          description: Sync health.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lenders]
+                properties:
+                  lenders:
+                    type: array
+                    items: { $ref: '#/components/schemas/SyncHealth' }
+
+components:
+  securitySchemes:
+    lenderKey:
+      type: http
+      scheme: bearer
+      description: Per-lender API key, issued after Discord sign-in. Planned.
+
+  parameters:
+    Username:
+      name: username
+      in: path
+      required: true
+      schema: { type: string }
+    Status:
+      name: status
+      in: query
+      schema: { $ref: '#/components/schemas/Status' }
+    Currency:
+      name: currency
+      in: query
+      schema: { $ref: '#/components/schemas/Currency' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  responses:
+    Error:
+      description: The request could not be served.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    LoanPage:
+      description: A page of loans.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [loans, total, limit, offset]
+            properties:
+              loans:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
+              total: { type: integer, description: Loans matching the filters, across all pages. }
+              limit: { type: integer }
+              offset: { type: integer }
+
+  schemas:
+    Currency:
+      type: string
+      enum: [AIC, CIS, ICA, NCC]
+    Status:
+      type: string
+      enum: [in_progress, complete, overdue, breached, terminated, stale]
+      description: |
+        - `in_progress`: paid out and being repaid
+        - `overdue`: a payment deadline has passed
+        - `breached`: the contract was breached in game
+        - `complete`: fully repaid
+        - `terminated`: ended early (cancelled offer or negotiated exit); not counted in totals
+        - `stale`: long past maturity and no longer reported by FIO; outcome unknown
+    Trust:
+      type: string
+      enum: [fio_verified, lender_reported, community_edited]
+      description: |
+        - `fio_verified`: checked against FIO game data
+        - `lender_reported`: sent by the lender, not verified
+        - `community_edited`: entered or changed by someone else
+    TrackingMode:
+      type: string
+      enum: [fio, api, manual]
+    LoanType:
+      type: [string, 'null']
+      enum: [stable, interest, annuity, advance, sponsored_base, other, null]
+      description: "`null` means unknown."
+    Amount:
+      type: string
+      pattern: '^\d+\.\d{2}$'
+      examples: ['25000000.00']
+
+    Borrower:
+      type: object
+      required: [id, username, companyCode, corpCode, aliases]
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        companyCode: { type: [string, 'null'], description: First company code seen for this borrower. }
+        corpCode: { type: [string, 'null'] }
+        aliases:
+          type: array
+          items: { type: string }
+          description: Former usernames.
+
+    Lender:
+      type: object
+      required: [id, username, companyCode, trackingMode]
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        companyCode: { type: [string, 'null'] }
+        trackingMode: { $ref: '#/components/schemas/TrackingMode' }
+
+    Loan:
+      type: object
+      required:
+        [id, contractId, lender, borrower, principal, currency, issuedOn, durationWeeks, maturesOn, loanType, status,
+         everBreached, outstanding, notes, trust, source, autoTrack, lastSyncedAt, updatedAt]
+      properties:
+        id: { type: integer, description: Bureau loan ID. }
+        contractId: { type: [string, 'null'], description: In-game contract ID; null for entries without one. }
+        lender: { type: string }
+        borrower:
+          type: object
+          required: [username, companyCode, corpCode]
+          properties:
+            username: { type: string }
+            companyCode: { type: [string, 'null'], description: As recorded on this loan. }
+            corpCode: { type: [string, 'null'], description: As recorded on this loan. }
+        principal: { $ref: '#/components/schemas/Amount' }
+        currency:
+          oneOf:
+            - $ref: '#/components/schemas/Currency'
+            - type: 'null'
+        issuedOn: { type: string, format: date }
+        durationWeeks: { type: [number, 'null'] }
+        maturesOn: { type: [string, 'null'], format: date }
+        loanType: { $ref: '#/components/schemas/LoanType' }
+        status: { $ref: '#/components/schemas/Status' }
+        everBreached: { type: boolean, description: True if the loan is, or ever was, breached. }
+        outstanding:
+          description: Principal still owed, when known.
+          oneOf:
+            - $ref: '#/components/schemas/Amount'
+            - type: 'null'
+        notes: { type: [string, 'null'] }
+        trust: { $ref: '#/components/schemas/Trust' }
+        source: { type: string, enum: [fio, api, manual, sheet_import] }
+        autoTrack: { type: boolean, description: True if the FIO sync keeps this loan up to date. }
+        lastSyncedAt: { type: [string, 'null'], format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    LoanReport:
+      type: object
+      required: [borrower, principal, currency, issuedOn, status]
+      properties:
+        borrower: { type: string, description: Borrower's username. }
+        principal: { $ref: '#/components/schemas/Amount' }
+        currency:
+          oneOf:
+            - $ref: '#/components/schemas/Currency'
+            - type: 'null'
+        issuedOn: { type: string, format: date }
+        durationWeeks: { type: [number, 'null'] }
+        loanType: { $ref: '#/components/schemas/LoanType' }
+        status: { $ref: '#/components/schemas/Status' }
+        outstanding:
+          oneOf:
+            - $ref: '#/components/schemas/Amount'
+            - type: 'null'
+        notes: { type: [string, 'null'] }
+
+    Exposure:
+      type: object
+      description: Figures for one currency.
+      required: [currency, loans, total, current, stale, breachedLoans, everBreachedLoans, overdueLoans, terminatedLoans]
+      properties:
+        currency:
+          oneOf:
+            - $ref: '#/components/schemas/Currency'
+            - type: 'null'
+        loans: { type: integer, description: All loans, including terminated ones. }
+        total: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: Everything lent, leaving out terminated loans. }
+        current: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: In Progress plus Overdue. }
+        stale: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: Outcome unknown. }
+        breachedLoans: { type: integer, description: Loans in breach now. }
+        everBreachedLoans: { type: integer, description: Loans that are or ever were in breach. }
+        overdueLoans: { type: integer }
+        terminatedLoans: { type: integer }
+
+    StatusChange:
+      type: object
+      required: [oldStatus, newStatus, changedAt, source]
+      properties:
+        oldStatus:
+          description: null when the loan was first seen.
+          oneOf:
+            - $ref: '#/components/schemas/Status'
+            - type: 'null'
+        newStatus: { $ref: '#/components/schemas/Status' }
+        changedAt: { type: string, format: date-time }
+        source: { type: string, enum: [fio_sync, api, edit, sheet_import] }
+
+    Revision:
+      type: object
+      required: [id, action, actorType, actor, before, after, createdAt]
+      properties:
+        id: { type: integer }
+        action: { type: string, enum: [import, create, update, delete] }
+        actorType: { type: string, enum: [system, lender, user] }
+        actor: { type: string }
+        before: { description: Values before the change; null for the first version. }
+        after: { description: Values after the change. }
+        createdAt: { type: string, format: date-time }
+
+    LeaderboardEntry:
+      type: object
+      required: [rank, lender, amount]
+      properties:
+        rank: { type: integer }
+        lender: { type: string }
+        amount: { $ref: '#/components/schemas/Amount' }
+
+    SyncHealth:
+      type: object
+      required: [lender, checkedAt, httpStatus, contractsReturned, loansKept, error, ok]
+      properties:
+        lender: { type: string }
+        checkedAt: { type: string, format: date-time }
+        httpStatus: { type: [integer, 'null'], description: FIO's HTTP response code. 401 means the lender has not granted contract permission. }
+        contractsReturned: { type: [integer, 'null'] }
+        loansKept: { type: [integer, 'null'], description: Contracts where this lender paid out the loan. }
+        error: { type: [string, 'null'] }
+        ok: { type: boolean }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, internal_error] }
+            message: { type: string }
