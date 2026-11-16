@@ -68,7 +68,7 @@ const Layout = (props: { title: string; children?: Child }) => html`<!doctype ht
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <title>{props.title} · PrUn Credit Bureau</title>
+      <title>{props.title} · PrUn Galactic Credit Bureau</title>
       <link rel="icon" type="image/svg+xml" href="/logo.svg" />
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
     </head>
@@ -77,7 +77,7 @@ const Layout = (props: { title: string; children?: Child }) => html`<!doctype ht
         <div class="inner">
           <a class="brand" href="/">
             <img src="/logo.svg" alt="" width="28" height="28" />
-            PrUn Credit Bureau
+            PrUn Galactic Credit Bureau
           </a>
           <nav>
             <a href="/lenders">Lenders</a>
@@ -231,7 +231,7 @@ pages.get('/', async (c) => {
   const totals = await q.getTotals(c.env.DB);
   return c.html(
     <Layout title="Borrower lookup">
-      <h1>Prosperous Universe Credit Bureau</h1>
+      <h1>PrUn Galactic Credit Bureau</h1>
       <p class="sub">
         See what a borrower already owes, and to whom, before you lend. {totals.loans.toLocaleString('en-US')} loans from {totals.lenders} lenders to{' '}
         {totals.borrowers} borrowers.
@@ -634,7 +634,7 @@ pages.get('/about', (c) =>
       <h1>About the bureau</h1>
       <div class="panel">
         <p>
-          The Prosperous Universe Credit Bureau collects loans reported by lenders so that anyone can see how much a borrower already owes and how
+          The PrUn Galactic Credit Bureau collects loans reported by lenders so that anyone can see how much a borrower already owes and how
           their past loans ended. Reporting is optional. All data is public.
         </p>
         <p>You can report in-game loan contracts, advances (advance purchases of goods) and sponsored bases.</p>

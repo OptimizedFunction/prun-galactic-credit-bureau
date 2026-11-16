@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Prosperous Universe Credit Bureau API
+  title: PrUn Galactic Credit Bureau API
   version: 0.1.0
   license:
     name: MIT

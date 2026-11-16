@@ -1,4 +1,6 @@
-# Prosperous Universe Credit Bureau
+# PrUn Galactic Credit Bureau
+
+<img src="assets/logo.svg" alt="" width="96" align="right">
 
 A public record of lending between [Prosperous Universe](https://prosperousuniverse.com/) players. Lenders report
 their loans so that anyone can see how much a borrower already owes, to whom, and how their past loans ended.
