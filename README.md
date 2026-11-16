@@ -8,7 +8,7 @@ their loans so that anyone can see how much a borrower already owes, to whom, an
 It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a website and an open JSON API.
 
 - All data is public. Reading needs no key.
-- Amounts always carry a currency (AIC, CIS, ICA, NCC) and are never added across currencies.
+- Amounts always carry a currency (AIC, CIS, ICA, NCC). They are only added across currencies on the combined leaderboard, at face value.
 - Every loan keeps a status history and a version history.
 
 ## Status

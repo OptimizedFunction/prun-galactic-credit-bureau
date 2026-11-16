@@ -4,7 +4,7 @@ import { html } from 'hono/html';
 import type { Child } from 'hono/jsx';
 import logoSvg from '../assets/logo.svg';
 import * as q from './db/queries';
-import { formatMinor, STATUS_LABELS, type Status } from './lib/normalize';
+import { CURRENCIES, formatMinor, isCurrency, STATUS_LABELS, type Status } from './lib/normalize';
 import type { Env } from './env';
 
 export const pages = new Hono<{ Bindings: Env }>();
@@ -35,6 +35,9 @@ footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
 h1 { font-size: 26px; margin: 0 0 4px; overflow-wrap: anywhere; }
 h2 { font-size: 18px; margin: 32px 0 10px; }
 p.sub { color: var(--muted); margin: 0 0 16px; }
+p.hint { color: var(--muted); font-size: 13px; margin: -4px 0 16px; }
+form.pick { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
+form.pick select, form.pick button { padding: 7px 10px; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
 form.search { display: flex; gap: 8px; margin: 16px 0; }
 form.search input { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
@@ -94,7 +97,7 @@ export const Layout = (props: { title: string; wide?: boolean; children?: Child 
         </div>
       </header>
       <main class={props.wide ? 'wide' : undefined}>{props.children}</main>
-      <footer>A public record of lending in Prosperous Universe. Amounts are in-game currency and are never summed across currencies.</footer>
+      <footer>A public record of lending in Prosperous Universe. Amounts are in-game currency, kept separate per currency except on the combined leaderboard.</footer>
       <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
     </body>
   </html>
@@ -554,6 +557,9 @@ pages.get('/loans/:id', async (c) => {
 
 pages.get('/leaderboards', async (c) => {
   const boards = await q.getLeaderboards(c.env.DB);
+  const wanted = (c.req.query('currency') ?? '').toUpperCase();
+  const currency = isCurrency(wanted) ? wanted : null;
+  const board = currency ? boards.leaderboards.find((b) => b.currency === currency)! : boards.combined;
   const Board = ({ title, entries }: { title: string; entries: q.LeaderboardEntry[] }) => (
     <div class="scroll">
       <table>
@@ -588,16 +594,33 @@ pages.get('/leaderboards', async (c) => {
   return c.html(
     <Layout title="Leaderboards">
       <h1>Leaderboards</h1>
-      <p class="sub">The twenty largest lenders in each currency, by all-time lending and by what is out today. Terminated loans are left out.</p>
-      {boards.map((b) => (
-        <>
-          <h2>{b.currency}</h2>
-          <div class="cols">
-            <Board title="Total lent, all time" entries={b.byTotal} />
-            <Board title="Out on loan now" entries={b.byCurrent} />
-          </div>
-        </>
-      ))}
+      <p class="sub">The twenty largest lenders, by all-time lending and by what is out today. Terminated loans are left out.</p>
+      <form class="pick" method="get" action="/leaderboards">
+        <label for="currency">Currency</label>
+        <select id="currency" name="currency" onchange="this.form.submit()">
+          <option value="" selected={currency === null}>
+            All currencies combined
+          </option>
+          {CURRENCIES.map((cur) => (
+            <option value={cur} selected={currency === cur}>
+              {cur}
+            </option>
+          ))}
+        </select>
+        <noscript>
+          <button type="submit">Show</button>
+        </noscript>
+      </form>
+      {currency === null && (
+        <p class="hint">
+          Combined figures add AIC, CIS, ICA and NCC together at face value, with no exchange rate applied. Read them as a rough measure of scale;
+          pick a currency for exact amounts.
+        </p>
+      )}
+      <div class="cols">
+        <Board title="Total lent, all time" entries={board.byTotal} />
+        <Board title="Out on loan now" entries={board.byCurrent} />
+      </div>
     </Layout>,
   );
 });

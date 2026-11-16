@@ -323,23 +323,47 @@ export interface Leaderboard {
   byCurrent: LeaderboardEntry[];
 }
 
+export interface Leaderboards {
+  leaderboards: Leaderboard[];
+  /**
+   * All four currencies added together at face value, with no exchange rate applied. A rough measure of
+   * scale only: the currencies are not worth the same.
+   */
+  combined: { byTotal: LeaderboardEntry[]; byCurrent: LeaderboardEntry[] };
+}
+
 /** Top lenders per currency, by everything lent and by what is out now. */
-export async function getLeaderboards(db: D1Database, size = 20): Promise<Leaderboard[]> {
+export async function getLeaderboards(db: D1Database, size = 20): Promise<Leaderboards> {
   const lenders = await listLenders(db);
   const currencies: Currency[] = ['AIC', 'CIS', 'ICA', 'NCC'];
-  return currencies.map((currency) => {
-    const rows = lenders.flatMap((l) => {
-      const e = l.exposure.find((x) => x.currency === currency);
-      return e ? [{ lender: l.username, total: e.totalMinor, current: e.currentMinor }] : [];
-    });
+  type Row = { lender: string; total: number; current: number };
+  const board = (rows: Row[]) => {
     const top = (key: 'total' | 'current'): LeaderboardEntry[] =>
       rows
         .filter((r) => r[key] > 0)
         .sort((a, b) => b[key] - a[key] || a.lender.localeCompare(b.lender))
         .slice(0, size)
         .map((r, i) => ({ rank: i + 1, lender: r.lender, amount: minorToDecimal(r[key]), amountMinor: r[key] }));
-    return { currency, byTotal: top('total'), byCurrent: top('current') };
-  });
+    return { byTotal: top('total'), byCurrent: top('current') };
+  };
+  return {
+    leaderboards: currencies.map((currency) => ({
+      currency,
+      ...board(
+        lenders.flatMap((l) => {
+          const e = l.exposure.find((x) => x.currency === currency);
+          return e ? [{ lender: l.username, total: e.totalMinor, current: e.currentMinor }] : [];
+        }),
+      ),
+    })),
+    combined: board(
+      lenders.map((l) => ({
+        lender: l.username,
+        total: l.exposure.reduce((sum, e) => sum + e.totalMinor, 0),
+        current: l.exposure.reduce((sum, e) => sum + e.currentMinor, 0),
+      })),
+    ),
+  };
 }
 
 export interface SearchResult {

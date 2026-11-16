@@ -119,7 +119,7 @@ api.get('/loans/:id', async (c) => {
   return json({ loan, statusHistory, revisions });
 });
 
-api.get('/leaderboards', async (c) => json({ leaderboards: await q.getLeaderboards(c.env.DB) }));
+api.get('/leaderboards', async (c) => json(await q.getLeaderboards(c.env.DB)));
 
 api.get('/sync', async (c) => json({ lenders: await q.getSyncHealth(c.env.DB) }));
 

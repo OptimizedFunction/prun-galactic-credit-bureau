@@ -18,7 +18,7 @@ info:
 
     Conventions:
     - Amounts are decimal strings (`"25000000.00"`) and always come with a currency. Amounts in
-      different currencies are never added together.
+      different currencies are never added together, except in the combined leaderboard.
     - `currency` is one of `AIC`, `CIS`, `ICA`, `NCC`, or `null` for lending that is not cash
       (for example a loan repaid in materials).
     - Usernames, company codes and contract IDs are case-insensitive.
@@ -411,16 +411,29 @@ paths:
   /leaderboards:
     get:
       tags: [Bureau]
-      summary: Top 20 lenders per currency
+      summary: Top 20 lenders, per currency and combined
       responses:
         '200':
-          description: One board per currency.
+          description: One board per currency, plus a combined board.
           content:
             application/json:
               schema:
                 type: object
-                required: [leaderboards]
+                required: [leaderboards, combined]
                 properties:
+                  combined:
+                    description: |
+                      All four currencies added together at face value, with no exchange rate applied.
+                      A rough measure of scale only; this is the one place amounts are added across currencies.
+                    type: object
+                    required: [byTotal, byCurrent]
+                    properties:
+                      byTotal:
+                        type: array
+                        items: { $ref: '#/components/schemas/LeaderboardEntry' }
+                      byCurrent:
+                        type: array
+                        items: { $ref: '#/components/schemas/LeaderboardEntry' }
                   leaderboards:
                     type: array
                     items:
