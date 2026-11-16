@@ -10,6 +10,8 @@
     "db:migrate": "wrangler d1 migrations apply bureau --local",
     "sheet:fetch": "tsx scripts/fetch-sheet.ts",
     "sheet:import": "tsx scripts/import-sheet.ts",
+    "sheet:verify": "tsx scripts/verify-import.ts",
+    "seed": "npm run db:migrate && npm run sheet:fetch && npm run sheet:import && npm run sheet:verify",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/normalize.test.ts",
     "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate"
