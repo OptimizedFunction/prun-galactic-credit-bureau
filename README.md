@@ -62,6 +62,10 @@ Anyone who signs in with Discord can add, edit and delete loans on the Ledger pa
 with the editor's Discord username and ID, shown on the Recent changes page, and can be undone there. Loans
 the FIO sync manages (Auto track ticked) only accept edits to their notes, and cannot be deleted.
 
+Several people can edit at once. Each save covers one cell and states the value the editor was looking at; if
+someone else changed that cell first, the save is refused and the row shows the current value. The ledger
+also checks for other people's changes every 30 seconds while its tab is visible.
+
 Sign-in needs a Discord application: put its client ID and secret in `.dev.vars`, and add
 `http://localhost:8787/auth/callback` and `http://127.0.0.1:8787/auth/callback` as redirect URLs in the
 Discord developer portal.

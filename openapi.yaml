@@ -253,6 +253,33 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
 
+  /updates:
+    get:
+      tags: [Bureau]
+      summary: Loans changed since a moment in time
+      description: |
+        Includes deleted loans (`deletedAt` set), oldest change first, up to 500. Not cached. Pass the returned
+        `cursor` as `since` on the next call. A loan may be returned more than once.
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Changed loans and the cursor for the next call.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loans, cursor]
+                properties:
+                  loans:
+                    type: array
+                    items: { $ref: '#/components/schemas/Loan' }
+                  cursor: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/Error' }
+
   /changes:
     get:
       tags: [Bureau]
@@ -294,7 +321,12 @@ paths:
     patch:
       tags: [Editing]
       summary: Edit a loan
-      description: Send only the fields to change. Sending current values changes nothing and records nothing.
+      description: |
+        Send only the fields to change. Sending current values changes nothing and records nothing.
+
+        To avoid overwriting someone else's edit, also send `expected`: the values you were looking at for the
+        fields you are changing. If any of them no longer matches, nothing is saved and the response is 409
+        with the loan as it is now.
       security:
         - session: []
       parameters:
@@ -303,7 +335,12 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/LoanEdit' }
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LoanEdit'
+                - type: object
+                  properties:
+                    expected: { $ref: '#/components/schemas/LoanEdit' }
       responses:
         '200':
           description: The loan after the edit, and which fields changed.
@@ -321,10 +358,15 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
         '409':
-          description: The loan is tracked from FIO, is deleted, or the contract ID is already used.
+          description: Someone changed the value first, the loan is tracked from FIO or deleted, or the contract ID is already used.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      loan: { $ref: '#/components/schemas/Loan' }
     delete:
       tags: [Editing]
       summary: Delete a loan
