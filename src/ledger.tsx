@@ -30,7 +30,7 @@ const LEDGER_CSS = `
 #ledger td.st-breached { color: var(--bad); font-weight: 600; } #ledger td.st-complete { color: var(--good); } #ledger td.st-overdue, #ledger td.st-stale { color: var(--warn); }
 .row-actions button, .undo { padding: 2px 8px; font: inherit; font-size: 13px; color: var(--bad); background: none; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
 .undo { color: var(--link); }
-.ledger-scroll { max-height: calc(100vh - 150px); overflow: auto; }
+.ledger-scroll { max-height: calc(100vh - 120px); overflow: auto; }
 form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; align-items: end; }
 form.add label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
 form.add input, form.add select { padding: 7px 8px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }

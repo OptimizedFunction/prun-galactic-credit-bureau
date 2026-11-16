@@ -24,11 +24,38 @@ const CSS = `
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
-header.site { background: var(--panel); border-bottom: 1px solid var(--line); }
 header.site .inner, main, footer { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
-header.site .inner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding-top: 12px; padding-bottom: 12px; }
-header.site .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); margin-right: auto; }
-header.site nav { display: flex; flex-wrap: wrap; gap: 16px; }
+
+/* Top bar: the logo's navy and gold in both light and dark themes. */
+header.site { position: sticky; top: 0; z-index: 20; color: #dfe6f5; background: linear-gradient(180deg, #14213f, #0d1730); border-bottom: 1px solid #263760; box-shadow: 0 1px 10px rgba(0, 0, 0, .28); }
+header.site .inner { display: flex; align-items: stretch; gap: 0 28px; max-width: 1280px; min-height: 58px; }
+header.site a:hover { text-decoration: none; }
+header.site .brand { display: flex; align-items: center; gap: 11px; color: #fff; white-space: nowrap; }
+header.site .brand img { filter: drop-shadow(0 0 6px rgba(242, 184, 75, .35)); }
+header.site .brand .name { display: grid; line-height: 1.15; font-size: 17px; font-weight: 700; letter-spacing: .01em; }
+header.site .brand .name small { font-size: 10.5px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: #f2b84b; }
+header.site nav { display: flex; align-items: stretch; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+header.site nav a { display: flex; align-items: center; padding: 0 12px; color: #aebbd6; font-size: 14px; font-weight: 500; white-space: nowrap; border-bottom: 2px solid transparent; border-top: 2px solid transparent; transition: color .15s, border-color .15s, background-color .15s; }
+header.site nav a:hover { color: #fff; background: rgba(255, 255, 255, .05); }
+header.site nav a[aria-current] { color: #fff; border-bottom-color: #f2b84b; }
+header.site .auth { position: relative; display: flex; align-items: center; min-width: 96px; justify-content: flex-end; }
+header.site .signin { padding: 7px 14px; border-radius: 8px; color: #fff; background: #5865f2; font-size: 14px; font-weight: 600; white-space: nowrap; }
+header.site .signin:hover { background: #4752c4; }
+header.site details.user summary { display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; color: #fff; font-size: 14px; font-weight: 500; border: 1px solid #2c3f6e; border-radius: 999px; cursor: pointer; list-style: none; user-select: none; }
+header.site details.user summary::-webkit-details-marker { display: none; }
+header.site details.user summary::after { content: "▾"; color: #aebbd6; font-size: 12px; }
+header.site details.user summary:hover, header.site details.user[open] summary { background: rgba(255, 255, 255, .07); border-color: #3d5490; }
+header.site .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #101a33; background: #f2b84b; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+header.site .uname { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header.site .menu { position: absolute; right: 0; top: calc(100% - 6px); display: grid; min-width: 210px; padding: 6px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .3); }
+header.site .menu .who { padding: 6px 10px 8px; margin-bottom: 4px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
+header.site .menu a, header.site .menu button { display: block; width: 100%; padding: 8px 10px; color: var(--text); background: none; border: 0; border-radius: 6px; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+header.site .menu a:hover, header.site .menu button:hover { background: var(--chip); }
+@media (max-width: 860px) {
+  header.site .inner { flex-wrap: wrap; padding-top: 8px; }
+  header.site .brand { flex: 1; }
+  header.site nav { order: 3; flex-basis: 100%; height: 42px; margin: 6px -16px 0; padding: 0 8px; border-top: 1px solid #263760; }
+}
 main { padding-top: 24px; padding-bottom: 40px; }
 main.wide { max-width: none; }
 footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
@@ -67,7 +94,49 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 `;
 
-const AUTH_SCRIPT = "fetch('/auth/me').then(function(r){return r.json()}).then(function(d){var el=document.getElementById('auth');if(!el)return;if(d.user){var out=document.createElement('a');out.href='#';out.textContent='Sign out';out.onclick=function(e){e.preventDefault();fetch('/auth/logout',{method:'POST'}).then(function(){location.reload()})};el.append(d.user.name+' · ',out)}else if(d.signInAvailable){var a=document.createElement('a');a.href='/auth/login?return='+encodeURIComponent(location.pathname+location.search);a.textContent='Sign in with Discord';el.append(a)}}).catch(function(){});";
+/** Marks the tab for the current page. Runs right after the nav is parsed, so there is no flicker. */
+const NAV_SCRIPT = `(function () {
+  var p = location.pathname;
+  document.querySelectorAll('#nav a').forEach(function (a) {
+    var h = a.getAttribute('href');
+    var on = h === '/' ? p === '/' || p === '/search' || p.indexOf('/borrowers/') === 0 : p === h || p.indexOf(h + '/') === 0;
+    if (on) a.setAttribute('aria-current', 'page');
+  });
+})();`;
+
+/** Fills the right-hand corner: a sign-in button, or the user's menu. */
+const AUTH_SCRIPT = `(function () {
+  var el = document.getElementById('auth');
+  function node(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text) n.textContent = text;
+    return n;
+  }
+  fetch('/auth/me').then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.user) {
+      if (!d.signInAvailable) return;
+      var a = node('a', 'signin', 'Sign in with Discord');
+      a.href = '/auth/login?return=' + encodeURIComponent(location.pathname + location.search);
+      el.append(a);
+      return;
+    }
+    var menu = node('details', 'user');
+    var summary = node('summary');
+    summary.append(node('span', 'avatar', d.user.name.slice(0, 1)), node('span', 'uname', d.user.name));
+    var panel = node('div', 'menu');
+    var track = node('a', '', 'Track my loans');
+    track.href = '/track';
+    var out = node('button', '', 'Sign out');
+    out.type = 'button';
+    out.onclick = function () { fetch('/auth/logout', { method: 'POST' }).then(function () { location.reload(); }); };
+    panel.append(node('div', 'who', 'Signed in with Discord'), track, out);
+    menu.append(summary, panel);
+    el.append(menu);
+    document.addEventListener('click', function (e) { if (!menu.contains(e.target)) menu.open = false; });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu.open = false; });
+  }).catch(function () {});
+})();`;
 
 export const Layout = (props: { title: string; wide?: boolean; children?: Child }) => html`<!doctype html>${(
   <html lang="en">
@@ -81,19 +150,24 @@ export const Layout = (props: { title: string; wide?: boolean; children?: Child 
     <body>
       <header class="site">
         <div class="inner">
-          <a class="brand" href="/">
-            <img src="/logo.svg" alt="" width="28" height="28" />
-            PrUn Galactic Credit Bureau
+          <a class="brand" href="/" aria-label="PrUn Galactic Credit Bureau, home">
+            <img src="/logo.svg" alt="" width="34" height="34" />
+            <span class="name">
+              <small>PrUn Galactic</small>
+              Credit Bureau
+            </span>
           </a>
-          <nav>
+          <nav id="nav" aria-label="Main">
+            <a href="/">Lookup</a>
             <a href="/ledger">Ledger</a>
             <a href="/lenders">Lenders</a>
             <a href="/leaderboards">Leaderboards</a>
             <a href="/sync">Sync health</a>
             <a href="/changes">Changes</a>
             <a href="/about">About</a>
-            <span id="auth" class="muted"></span>
           </nav>
+          <script dangerouslySetInnerHTML={{ __html: NAV_SCRIPT }} />
+          <div id="auth" class="auth"></div>
         </div>
       </header>
       <main class={props.wide ? 'wide' : undefined}>{props.children}</main>
