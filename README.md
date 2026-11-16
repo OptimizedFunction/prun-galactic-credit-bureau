@@ -20,6 +20,7 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | Read API (`/api/v1`) and public pages | Done |
 | Automatic sync from FIO | Done; run against live FIO locally |
 | Community editing (ledger page, Discord sign-in, change log with undo) | Done; sign-in itself not yet tried with a real Discord account |
+| Lenders connecting their own FIO key (Track my loans page) | Done |
 | Lender API keys and the report endpoint | Not started |
 | Deployment | Not started (runs locally only) |
 
@@ -47,8 +48,16 @@ local database; stop `npm run dev` first).
 
 ### FIO sync
 
-The sync runs hourly as a cron trigger and does nothing unless `FIO_API_KEY` is set. To run it locally, put
-the key in `.dev.vars`, start `npm run dev:cron`, and open `http://localhost:8787/__scheduled`. Results show
+The sync runs hourly as a cron trigger. It reads each tracked lender's loan contracts from FIO using:
+
+- the lender's own FIO API key, if they connected one on the Track my loans page (stored encrypted with
+  `FIO_KEY_SECRET`), or otherwise
+- `FIO_API_KEY`, a bureau FIO account that the lender granted contract permission to (optional).
+
+Set `FIO_KEY_SECRET` to any long random string in `.dev.vars`. Do not change it once keys are stored: they
+become unreadable and lenders have to connect again.
+
+To run the sync locally, start `npm run dev:cron` and open `http://localhost:8787/__scheduled`. Results show
 on the Sync health page.
 
 `npm run sync:dry` fetches from live FIO and prints what the sync would change, without writing anything.
@@ -102,6 +111,7 @@ src/api.ts       JSON API
 src/pages.tsx    Server-rendered pages
 src/ledger.tsx   Editable ledger and Recent changes pages
 src/auth.ts      Discord sign-in and the signed session cookie
+src/track.tsx    Track my loans page (lenders connect a FIO key)
 assets/          Logo and the ledger's browser script
 src/db/          Database queries and edits
 src/sync/        FIO sync: client, decision rules, database writes

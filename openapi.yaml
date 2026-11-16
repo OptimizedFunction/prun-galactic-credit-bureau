@@ -32,6 +32,8 @@ tags:
   - name: Bureau
   - name: Editing
     description: Needs a Discord sign-in.
+  - name: Tracking
+    description: Lenders connecting their own FIO API key. Needs a Discord sign-in.
   - name: Reporting
     description: Planned. Not implemented yet.
 
@@ -252,6 +254,103 @@ paths:
         '200': { $ref: '#/components/responses/EditedLoan' }
         '401': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
+
+  /fio-keys:
+    get:
+      tags: [Tracking]
+      summary: Lenders you have connected
+      security:
+        - session: []
+      responses:
+        '200':
+          description: The lenders whose FIO key you connected. Keys themselves are never returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lenders]
+                properties:
+                  lenders:
+                    type: array
+                    items:
+                      type: object
+                      required: [username, connectedAt]
+                      properties:
+                        username: { type: string }
+                        connectedAt: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Tracking]
+      summary: Connect a lender's FIO API key
+      description: |
+        The bureau asks FIO whose key it is and refuses unless it belongs to `username`. The key is stored
+        encrypted and used only to read that account's loan contracts. The lender is switched to automatic
+        tracking and a sync starts straight away.
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, apiKey]
+              properties:
+                username: { type: string, description: The lender's Prosperous Universe username. }
+                apiKey: { type: string, description: A FIO API key created by that account. }
+      responses:
+        '201':
+          description: Connected.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [lender, contractsFound, loansFound]
+                properties:
+                  lender:
+                    type: object
+                    required: [username, trackingMode]
+                    properties:
+                      username: { type: string }
+                      trackingMode: { $ref: '#/components/schemas/TrackingMode' }
+                  contractsFound: { type: integer, description: Loan contracts FIO returned for the account. }
+                  loansFound: { type: integer, description: Of those, live loans this account paid out. }
+        '400':
+          description: FIO does not recognise the key, or it belongs to a different account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '502':
+          description: FIO could not be reached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: Connecting keys is not configured on this server.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /fio-keys/{username}:
+    delete:
+      tags: [Tracking]
+      summary: Disconnect a lender
+      description: Deletes the stored key and stops automatic tracking. Only the person who connected the lender may do this.
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: Disconnected.
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409':
+          description: Someone else connected this lender.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /updates:
     get:
@@ -761,5 +860,5 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, internal_error] }
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, fio_unreachable, unavailable, internal_error] }
             message: { type: string }
