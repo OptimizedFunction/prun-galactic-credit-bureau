@@ -506,7 +506,18 @@ export interface Change extends Revision {
 }
 
 /** Recent changes to loans, newest first. Sheet-import rows are left out; system (sync) changes are optional. */
-export async function listChanges(db: D1Database, opts: { includeSystem: boolean; limit: number; offset: number }): Promise<Change[]> {
+export interface ChangeFilter {
+  includeSystem: boolean;
+  /** Only changes by this person (Discord username) or system job. */
+  actor?: string;
+  /** Only changes to this loan: a contract ID, or a bureau loan number. */
+  loan?: string;
+  limit: number;
+  offset: number;
+}
+
+export async function listChanges(db: D1Database, opts: ChangeFilter): Promise<Change[]> {
+  const loanNumber = opts.loan && /^\d+$/.test(opts.loan) ? Number(opts.loan) : null;
   const { results } = await db
     .prepare(
       `SELECT r.id, r.entity_id, r.action, r.actor_type, r.actor, r.actor_id, r.before_json, r.after_json, r.created_at,
@@ -515,10 +526,13 @@ export async function listChanges(db: D1Database, opts: { includeSystem: boolean
        JOIN loans l ON l.id = r.entity_id
        JOIN lenders le ON le.id = l.lender_id
        JOIN borrowers b ON b.id = l.borrower_id
-       WHERE r.entity_type = 'loan' AND r.action <> 'import' AND (?1 = 1 OR r.actor_type = 'user')
+       WHERE r.entity_type = 'loan' AND r.action <> 'import' AND (?1 = 1 OR r.actor_type <> 'system')
+         AND (?4 IS NULL OR r.actor = ?4 COLLATE NOCASE)
+         AND (?5 IS NULL OR l.contract_id = upper(?5) OR l.id = ?6)
        ORDER BY r.id DESC LIMIT ?2 OFFSET ?3`,
     )
-    .bind(opts.includeSystem ? 1 : 0, opts.limit, opts.offset)
+    // Naming a person or a loan implies wanting everything about them, automatic changes included.
+    .bind(opts.includeSystem || opts.actor || opts.loan ? 1 : 0, opts.limit, opts.offset, opts.actor ?? null, opts.loan ?? null, loanNumber)
     .all<{ id: number; entity_id: number; action: string; actor_type: string; actor: string; actor_id: string | null; before_json: string | null; after_json: string | null; created_at: string; contract_id: string | null; lender: string; borrower: string; deleted_at: string | null; auto_track: number }>();
   return results.map((r) => ({
     id: r.id,

@@ -38,6 +38,15 @@ const LEDGER_CSS = `
 #ledger td.st-breached { color: var(--bad); font-weight: 600; } #ledger td.st-complete { color: var(--good); } #ledger td.st-overdue, #ledger td.st-stale { color: var(--warn); }
 .row-actions button, .undo { padding: 2px 8px; font: inherit; font-size: 13px; color: var(--bad); background: none; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
 .undo { color: var(--link); }
+form.filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; margin: 0 0 16px; }
+form.filters label { display: grid; gap: 2px; color: var(--muted); font-size: 13px; }
+form.filters input { min-width: 200px; padding: 7px 9px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+form.filters button { padding: 8px 14px; color: #fff; background: #1558b0; border: 0; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+details.columns { position: relative; }
+details.columns summary { padding: 7px 12px; color: var(--link); border: 1px solid var(--line); border-radius: 6px; font-size: 14px; cursor: pointer; list-style: none; user-select: none; }
+details.columns summary::-webkit-details-marker { display: none; }
+details.columns .picker { position: absolute; right: 0; top: calc(100% + 6px); z-index: 5; display: grid; gap: 4px; min-width: 170px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .25); }
+details.columns label { display: flex; align-items: center; gap: 8px; font-size: 14px; white-space: nowrap; }
 .ledger-scroll { max-height: calc(100vh - 120px); overflow: auto; }
 form.add { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; align-items: end; }
 form.add label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
@@ -171,6 +180,10 @@ ledgerPages.get('/ledger', async (c) => {
       <div class="toolbar">
         <input type="search" id="ledger-filter" placeholder="Filter: any text, e.g. a username, contract ID or status" aria-label="Filter loans" />
         <span id="ledger-count" class="muted"></span>
+        <details class="columns" id="ledger-columns">
+          <summary>Columns</summary>
+          <div class="picker"></div>
+        </details>
         <span id="ledger-msg" role="status"></span>
       </div>
       <div class="scroll ledger-scroll">
@@ -225,12 +238,23 @@ ledgerPages.get('/changes', async (c) => {
   const includeSystem = c.req.query('system') === '1';
   const page = Math.max(1, Number(c.req.query('page')) || 1);
   const size = 100;
+  const actor = (c.req.query('by') ?? '').trim() || undefined;
+  const loan = (c.req.query('loan') ?? '').trim() || undefined;
   const [user, changes] = await Promise.all([
     currentUser(c),
-    q.listChanges(c.env.DB, { includeSystem, limit: size + 1, offset: (page - 1) * size }),
+    q.listChanges(c.env.DB, { includeSystem, actor, loan, limit: size + 1, offset: (page - 1) * size }),
   ]);
   const more = changes.length > size;
-  const link = (p: number) => `/changes?page=${p}${includeSystem ? '&system=1' : ''}`;
+  const query = (extra: Record<string, string | number | undefined>) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries({ by: actor, loan, system: includeSystem ? 1 : undefined, ...extra })) {
+      if (value !== undefined && value !== '') params.set(key, String(value));
+    }
+    const text = params.toString();
+    return text ? `/changes?${text}` : '/changes';
+  };
+  const link = (p: number) => query({ page: p });
+  const filtered = Boolean(actor || loan);
   c.header('Cache-Control', 'no-store');
 
   return c.html(
@@ -239,7 +263,8 @@ ledgerPages.get('/changes', async (c) => {
       <h1>Recent changes</h1>
       <p class="sub">
         A public record of every edit, newest first.{' '}
-        {includeSystem ? <a href="/changes">Hide automatic changes</a> : <a href="/changes?system=1">Show the FIO sync's automatic changes too</a>}.
+        {!filtered && (includeSystem ? <a href={query({ system: undefined })}>Hide automatic changes</a> : <a href={query({ system: 1 })}>Show the FIO sync's automatic changes too</a>)}
+        {!filtered && '.'}
         {!user && (
           <>
             {' '}
@@ -247,8 +272,20 @@ ledgerPages.get('/changes', async (c) => {
           </>
         )}
       </p>
+      <form class="filters" method="get" action="/changes">
+        <label>
+          By
+          <input name="by" value={actor ?? ''} placeholder="Discord username" maxlength={64} />
+        </label>
+        <label>
+          Loan
+          <input name="loan" value={loan ?? ''} placeholder="Contract ID or loan number" maxlength={32} />
+        </label>
+        <button type="submit">Filter</button>
+        {filtered && <a href="/changes">Clear</a>}
+      </form>
       {changes.length === 0 ? (
-        <p class="muted">No changes yet.</p>
+        <p class="muted">{filtered ? 'No changes match.' : 'No changes yet.'}</p>
       ) : (
         <div class="scroll">
           <table>
@@ -271,7 +308,11 @@ ledgerPages.get('/changes', async (c) => {
                     <td>
                       {ch.createdAt.slice(0, 10)} {ch.createdAt.slice(11, 16)}
                     </td>
-                    <td>{ch.actorType === 'user' ? ch.actor : <span class="muted">{ch.actor}</span>}</td>
+                    <td>
+                      <a class={ch.actorType === 'system' ? 'muted' : undefined} href={`/changes?by=${encodeURIComponent(ch.actor)}`} title="Show only this one's changes">
+                        {ch.actor}
+                      </a>
+                    </td>
                     <td>
                       <a href={`/loans/${ch.loanId}`}>
                         {ch.lender} → {ch.borrower}
