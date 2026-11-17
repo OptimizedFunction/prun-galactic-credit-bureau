@@ -5,28 +5,63 @@
 A public record of lending between [Prosperous Universe](https://prosperousuniverse.com/) players. Lenders report
 their loans so that anyone can see how much a borrower already owes, to whom, and how their past loans ended.
 
-It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a website and an open JSON API.
+Live at **https://bureau.prunbanking.com**. It replaces the community "PRUN Credit Bureau Automated" Google
+Sheet with a website and an open JSON API.
 
-- All data is public. Reading needs no key.
-- Amounts always carry a currency (AIC, CIS, ICA, NCC). Summaries also show a combined figure, which adds the four
-  currencies at face value with no exchange rate, and says so.
-- Every loan keeps a status history and a version history.
+## Features
 
-## Status
+### Looking someone up
 
-| Part | State |
-|---|---|
-| Database schema | Done |
-| Import of the existing sheet, checked against its Summary tab | Done |
-| Read API (`/api/v1`) and public pages | Done |
-| Automatic sync from FIO | Done; run against live FIO locally |
-| Community editing (ledger page, Discord sign-in, change log with undo) | Done; sign-in itself not yet tried with a real Discord account |
-| Lenders connecting their own FIO key (Track my loans page) | Done |
-| My lending (a connected lender's own view, with key health) | Done |
-| Lender API keys and the report endpoint | Done |
-| Token-bucket rate limiting on the API | Done |
-| Blocking accounts and rolling back their changes | Done |
-| Deployment | Not started (runs locally only) |
+- **Lookup** by in-game username or company code, with suggestions as you type.
+- **Borrower page**: a verdict banner (clean, owes now, has breached), what they owe per currency and combined,
+  every loan they have taken, and who lent it.
+- **Lender page**: what a lender has out now and has lent in total, and every loan they made.
+- **Loan page**: the loan's facts, where the record comes from, and one timeline of every status change and
+  edit. Notes can be added or edited in place.
+- **Lenders list**: every lender with what they have out per currency, a filter box, sorting, and when each
+  connected lender last synced.
+- **Leaderboards** per currency and for all four combined.
+- Amounts always carry a currency (AIC, CIS, ICA, NCC). Summaries also show a combined figure that adds the
+  four at face value, with no exchange rate.
+
+### Keeping the record current
+
+- **Automatic tracking through FIO.** A lender pastes their own FIO API key on the Track my loans page. The
+  key proves the account is theirs, is stored encrypted, and is used hourly to read their loan contracts:
+  new loans are added, and statuses and durations follow the game. There is no shared key and no FIO group.
+- **My lending**: a connected lender's own view of their book, with the health of their key.
+- **Community editing.** Anyone signed in with Discord can add, edit and delete manually entered loans in a
+  spreadsheet-like Ledger. Loans tracked through FIO only accept notes.
+- **Safe with several editors.** Each save states the value the editor was looking at and is refused if
+  someone changed it first. The ledger picks up other people's changes in the background.
+- **Reporting API for lenders.** A connected lender can create a key and record loans the game cannot see
+  from their own tools.
+- **Sheet migration.** A script pulls later changes from the Google Sheet into the live database and
+  reconciles them with edits made on the site.
+
+### Trust and history
+
+- **Trust labels** on every loan: FIO-verified, Lender-reported or Community-edited.
+- **Status history** per loan, so a breach that was later cured still counts as "ever breached".
+- **Version history.** Every change records who made it and the values before and after. Recent changes lists
+  them all, with filters, and any signed-in user can undo one.
+- **Abuse recovery.** Maintainers can block an account or lender key and roll back everything it did since a
+  chosen time. The database also keeps 30 days of point-in-time history.
+
+### Open API
+
+- **Open read API** under `/api/v1`, no key or account needed: companies, borrowers, lenders, loans, search,
+  leaderboards, changes.
+- **Interactive reference** at [/api](https://bureau.prunbanking.com/api), where each endpoint can be tried,
+  and a machine-readable description at `/openapi.yaml`.
+- **Rate limiting** by token bucket, with `Retry-After` and `RateLimit-*` headers.
+
+### Using the site
+
+- Works on phones; tables turn into cards. The Ledger is read-only on small screens to prevent accidental edits.
+- Light and dark themes: follows the system setting, with a switch that remembers a manual choice.
+- Signed-in users see their Discord name and picture, with their own pages one click away.
+- Every page has a shareable address and a link preview.
 
 ## Run it locally
 
@@ -49,6 +84,9 @@ npm run dev      # http://localhost:8787
 
 Other commands: `npm test` (unit tests), `npm run typecheck`, `npm run db:reset` (delete and recreate the
 local database; stop `npm run dev` first).
+
+To import a copy of the sheet instead of the original, set `SHEET_ID` (and `SHEET_GIDS` if the tab IDs differ,
+e.g. `{"status-history":123,"lender-sync":456}`).
 
 ### Pulling later sheet changes into a database that is in use
 
@@ -92,9 +130,6 @@ in the Updates column of the Lenders page.
 
 `npm run sync:dry` fetches from live FIO and prints what the sync would change, without writing anything.
 
-To import a copy of the sheet instead, set `SHEET_ID` (and `SHEET_GIDS` if the tab IDs differ, e.g.
-`{"status-history":123,"lender-sync":456}`).
-
 ## Editing
 
 Anyone who signs in with Discord can add, edit and delete loans on the Ledger page. Every change is recorded
@@ -105,9 +140,12 @@ Several people can edit at once. Each save covers one cell and states the value 
 someone else changed that cell first, the save is refused and the row shows the current value. The ledger
 also checks for other people's changes every 30 seconds while its tab is visible.
 
-Sign-in needs a Discord application: put its client ID and secret in `.dev.vars`, and add
-`http://localhost:8787/auth/callback` and `http://127.0.0.1:8787/auth/callback` as redirect URLs in the
-Discord developer portal.
+Notes can also be edited from a loan's own page.
+
+Sign-in needs a Discord application: put its client ID and secret in `.dev.vars`, and add these redirect URLs
+in the Discord developer portal: `http://localhost:8787/auth/callback` and
+`http://127.0.0.1:8787/auth/callback` for development, `https://bureau.prunbanking.com/auth/callback` for
+the live site.
 
 ## Reporting API
 
@@ -169,6 +207,33 @@ GET /api/v1/changes
 - **Stale** means a loan is long past maturity and FIO no longer reports it, so the outcome is unknown. It is shown separately.
 - **Ever breached** uses the status history, so a breach that was later cured still shows.
 
+## Deployment
+
+The site is a Cloudflare Worker with a D1 database, served on `bureau.prunbanking.com` (see `wrangler.jsonc`).
+
+```sh
+npx wrangler login                                # once per machine
+npx wrangler d1 migrations apply bureau --remote  # when migrations/ has something new
+npx wrangler deploy
+```
+
+Production secrets are set with `npx wrangler secret put NAME`:
+
+| Secret | Purpose |
+|---|---|
+| `FIO_KEY_SECRET` | Encrypts the FIO keys lenders connect. Never change it once keys are stored |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Discord sign-in |
+| `ADMIN_DISCORD_IDS` | Discord user IDs of maintainers, comma-separated |
+
+A new, empty database is loaded by building a clean local seed and sending it up:
+
+```sh
+npx wrangler d1 migrations apply bureau --local --persist-to .wrangler/seed
+D1_PERSIST=.wrangler/seed npm run sheet:import
+D1_PERSIST=.wrangler/seed npx tsx scripts/export-seed.ts data/seed.sql
+npx wrangler d1 execute bureau --remote --file data/seed.sql
+```
+
 ## Layout
 
 ```
@@ -186,14 +251,14 @@ assets/          Logo and the ledger's browser script
 src/db/          Database queries, edits, lender keys, blocking and rollback
 src/sync/        FIO sync: client, decision rules, database writes
 src/lib/         Shared pure helpers (amounts, IDs, statuses)
-scripts/         Sheet download, import and verification
+scripts/         Sheet download, import, verification and migration; seed export
 test/            Unit tests
 ```
 
 ## Secrets
 
 No secret belongs in this repository. Copy `.dev.vars.example` to `.dev.vars` (git-ignored) for local
-development; in production use `wrangler secret put`.
+development; in production they are Cloudflare secrets (see Deployment).
 
 ## Licence
 
