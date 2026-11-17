@@ -23,6 +23,8 @@ info:
     **Reporting** lets a lender's own tools record loans, with that lender's API key sent as
     `Authorization: Bearer <key>`. A lender creates the key on the Track my loans page after connecting FIO,
     which is what proves the account is theirs. A key can only report loans under its own lender.
+    A lender may override what FIO says about their own loans: reporting different values switches FIO tracking
+    off for that loan, and `/lenders/{username}/loans/{contractId}/tracking` switches it back on.
 
     Conventions:
     - Amounts are decimal strings (`"25000000.00"`) and always come with a currency. Amounts in
@@ -271,9 +273,14 @@ paths:
         A first report must carry borrower, principal, issuedOn and status. Later ones may send only what
         changed. `lender`, `contractId` and `autoTrack` in the body are ignored.
 
-        Refused with 409 when the contract is recorded under another lender, is kept up to date from FIO,
-        or was deleted from the bureau. To add notes to a loan kept up to date from FIO, use
+        **Overriding FIO.** A report that changes anything other than notes on one of the lender's loans kept up to
+        date from FIO is applied, and switches FIO tracking off for that loan, so the sync does not put FIO's values
+        back. `changed` then includes `autoTrack`, and the loan's history records the reason. A report matching what is
+        recorded changes nothing and leaves tracking on. Switch tracking back on with
+        `/lenders/{username}/loans/{contractId}/tracking`. To add notes without touching tracking, use
         `/lenders/{username}/loans/{contractId}/notes`.
+
+        Refused with 409 when the contract is recorded under another lender or was deleted from the bureau.
       security:
         - lenderKey: []
       parameters:
@@ -318,7 +325,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Recorded under another lender, tracked from FIO, or deleted.
+          description: Recorded under another lender, or deleted.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -329,8 +336,8 @@ paths:
       tags: [Reporting]
       summary: Set or add to a loan's notes
       description: |
-        Changes only the notes on one of the lender's own loans, **including loans kept up to date from FIO**,
-        whose other fields a lender cannot report. The loan must already be in the bureau, under this lender, and not deleted.
+        Changes only the notes on one of the lender's own loans. On a loan kept up to date from FIO, tracking stays on
+        (a report would switch it off). The loan must already be in the bureau, under this lender, and not deleted.
         The trust label does not change.
 
         Send one of:
@@ -408,6 +415,75 @@ paths:
                   - type: object
                     properties:
                       loan: { $ref: '#/components/schemas/Loan' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /lenders/{username}/loans/{contractId}/tracking:
+    put:
+      tags: [Reporting]
+      summary: Switch FIO tracking on or off for a loan
+      description: |
+        Turns automatic tracking from FIO on or off for one of the lender's own loans. Nothing else about the loan changes.
+
+        - `true` hands the loan back to the FIO sync, which updates its status and duration from FIO from the next hourly run.
+          Use it after a report overrode FIO and the override is no longer needed. Needs the lender's FIO account connected
+          (409 otherwise), and only makes sense for a loan with a real in-game contract ID: a loan FIO never returns is
+          eventually marked Stale. Once FIO's lender, amount and currency agree with the loan, its label returns to `fio_verified`.
+        - `false` stops the sync changing the loan.
+
+        Every change is recorded in the loan's history under the lender's name. Asking for the current setting changes nothing.
+      security:
+        - lenderKey: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [autoTrack]
+              properties:
+                autoTrack: { type: boolean }
+            example: { autoTrack: true }
+      responses:
+        '200':
+          description: The loan after the change; `changed` is `["autoTrack"]`, or empty when it was already set that way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan, changed]
+                properties:
+                  loan: { $ref: '#/components/schemas/Loan' }
+                  changed:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401':
+          description: No key, or a key the bureau does not know.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: The key belongs to a different lender.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: The contract is not in the bureau.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Recorded under another lender, deleted, or (turning tracking on) the lender's FIO account is not connected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '429': { $ref: '#/components/responses/Error' }
 
   /lender-keys:

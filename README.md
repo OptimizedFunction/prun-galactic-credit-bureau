@@ -35,7 +35,8 @@ Sheet with a website and an open JSON API.
 - **Safe with several editors.** Each save states the value the editor was looking at and is refused if
   someone changed it first. The ledger picks up other people's changes in the background.
 - **Reporting API for lenders.** A connected lender can create a key and record loans the game cannot see
-  from their own tools, and add notes to any of their loans, including ones tracked from FIO.
+  from their own tools, add notes to any of their loans, and override FIO's figures for their own loans
+  (which stops tracking that loan until they switch it back on).
 - **Sheet migration.** A script pulls later changes from the Google Sheet into the live database and
   reconciles them with edits made on the site.
 
@@ -161,9 +162,16 @@ curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract or own refe
 Reports are idempotent by contract ID, labelled Lender-reported, and listed in Recent changes like any edit.
 Only the key's hash is stored.
 
-The same key can add notes to any of the lender's own loans, including ones kept up to date from FIO, whose other
-fields it cannot report. Send `append` to add a line, or `notes` to replace them (with `expected` to be refused
-rather than overwrite someone else's change):
+A lender can also override what FIO says about their own loans. Reporting different values for a loan kept up to
+date from FIO applies them and switches FIO tracking off for that loan, so the sync does not put FIO's values back.
+Switch it back on when the override is no longer needed:
+
+```sh
+curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract>/tracking   -H "Authorization: Bearer pgcb_..." -H "Content-Type: application/json" -d '{"autoTrack":true}'
+```
+
+The same key can add notes to any of the lender's own loans without touching tracking. Send `append` to add a line,
+or `notes` to replace them (with `expected` to be refused rather than overwrite someone else's change):
 
 ```sh
 curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract>/notes \

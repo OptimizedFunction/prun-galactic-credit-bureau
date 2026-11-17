@@ -149,7 +149,42 @@ test('reporting a loan is idempotent by contract ID and labelled lender-reported
   assert.deepEqual({ lender: still.lender, autoTrack: still.autoTrack }, { lender: 'HandEntered', autoTrack: false });
 });
 
-test('a lender cannot report over another lender, a FIO-tracked loan or a deleted one', async () => {
+test('a lender report overrides FIO on its own tracked loan, which stops being tracked until switched back on', async () => {
+  const { createLoan, parseLoanFields, reportLoan, setLoanTracking } = await import('../src/db/edits');
+  const q = await import('../src/db/queries');
+  const lender = (await db.prepare("SELECT id, username FROM lenders WHERE username = 'HandEntered'").first<{ id: number; username: string }>())!;
+  const id = await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '5', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'OVERRD1', autoTrack: true }), ANN);
+  await db.prepare("UPDATE loans SET trust = 'fio_verified' WHERE id = ?").bind(id).run();
+  const facts = { borrower: 'Ivy', principal: '5', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress' };
+
+  // A report that matches what is recorded changes nothing, and tracking stays on.
+  assert.deepEqual((await reportLoan(db, lender, 'OVERRD1', parseLoanFields(facts))).changed, []);
+  assert.equal((await q.getLoan(db, id))!.autoTrack, true);
+
+  // A different status overrides FIO: applied, tracking off, labelled lender-reported, with the reason in the history.
+  const report = await reportLoan(db, lender, 'OVERRD1', parseLoanFields({ ...facts, status: 'Complete' }));
+  assert.deepEqual(report.changed.sort(), ['autoTrack', 'status']);
+  const loan = (await q.getLoan(db, id))!;
+  assert.deepEqual({ status: loan.status, autoTrack: loan.autoTrack, trust: loan.trust }, { status: 'complete', autoTrack: false, trust: 'lender_reported' });
+  const [revision] = await q.getRevisions(db, 'loan', id);
+  assert.match(String((revision!.after as Record<string, unknown>)['reason']), /overriding FIO/);
+
+  // Switching tracking back on needs the lender's FIO account connected.
+  const saved = (await db.prepare('SELECT tracking_mode, fio_key_enc FROM lenders WHERE id = ?').bind(lender.id).first<{ tracking_mode: string; fio_key_enc: string | null }>())!;
+  await db.prepare("UPDATE lenders SET tracking_mode = 'manual', fio_key_enc = NULL WHERE id = ?").bind(lender.id).run();
+  await assert.rejects(() => setLoanTracking(db, lender, 'OVERRD1', true), (err: unknown) => err instanceof EditError && err.kind === 'conflict' && /Connect your FIO account/.test(err.message));
+  await db.prepare("UPDATE lenders SET tracking_mode = 'fio', fio_key_enc = 'v1.x.y' WHERE id = ?").bind(lender.id).run();
+  assert.deepEqual((await setLoanTracking(db, lender, 'overrd1', true)).changed, ['autoTrack']);
+  assert.equal((await q.getLoan(db, id))!.autoTrack, true);
+  assert.deepEqual((await setLoanTracking(db, lender, 'OVERRD1', true)).changed, [], 'already on');
+  // Off again by hand, and back, without touching anything else.
+  assert.deepEqual((await setLoanTracking(db, lender, 'OVERRD1', false)).changed, ['autoTrack']);
+  await setLoanTracking(db, lender, 'OVERRD1', true);
+  await db.prepare('UPDATE lenders SET tracking_mode = ?, fio_key_enc = ? WHERE id = ?').bind(saved.tracking_mode, saved.fio_key_enc, lender.id).run();
+  await assert.rejects(() => setLoanTracking(db, lender, 'NOPE001', false), (err: unknown) => err instanceof EditError && err.kind === 'not_found');
+});
+
+test('a lender cannot report over another lender or a deleted loan', async () => {
   const { createLoan, deleteLoan, parseLoanFields, reportLoan } = await import('../src/db/edits');
   const lender = (await db.prepare("SELECT id, username FROM lenders WHERE username = 'HandEntered'").first<{ id: number; username: string }>())!;
   const report = parseLoanFields({ borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'Complete' });
@@ -159,9 +194,8 @@ test('a lender cannot report over another lender, a FIO-tracked loan or a delete
   await createLoan(db, parseLoanFields({ lender: 'Granted', borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'OTHERS1' }), ANN);
   await refused('OTHERS1', /another lender \(Granted\)/);
 
-  const trackedId = await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '5', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'TRACKD1', autoTrack: true }), ANN);
-  await refused('TRACKD1', /kept up to date from FIO/);
-  assert.ok(trackedId > 0);
+  // Used by the notes test below; it stays tracked.
+  await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '5', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'TRACKD1', autoTrack: true }), ANN);
 
   const goneId = await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'GONE001' }), ANN);
   await deleteLoan(db, goneId, ANN);

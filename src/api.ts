@@ -416,6 +416,18 @@ api.put('/lenders/:username/loans/:contractId/notes', async (c) => {
   }
 });
 
+/** Switch FIO tracking on or off for one of the lender's own loans. */
+api.put('/lenders/:username/loans/:contractId/tracking', async (c) => {
+  const lender = await lenderFromKey(c);
+  if (lender.username.toLowerCase() !== c.req.param('username').toLowerCase()) {
+    throw new ApiError(403, 'forbidden', `This key belongs to ${lender.username}. A lender can only change tracking on their own loans.`);
+  }
+  const body = await jsonBody(c);
+  if (typeof body['autoTrack'] !== 'boolean') throw new ApiError(400, 'bad_request', 'Send "autoTrack": true to track this loan from FIO, or false to stop.');
+  const result = await edits.setLoanTracking(c.env.DB, lender, c.req.param('contractId'), body['autoTrack']);
+  return json({ loan: await q.getLoan(c.env.DB, result.loanId), changed: result.changed });
+});
+
 /** Create (or replace) the reporting API key of a lender the signed-in user connected. The key is shown this once. */
 api.post('/lender-keys', async (c) => {
   const user = await editor(c);

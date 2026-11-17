@@ -322,6 +322,11 @@ export interface UpdateOptions {
   trust?: Trust;
   /** A reason, recorded with the change and shown in the loan's history. */
   reason?: string;
+  /**
+   * When the edit changes a fact the FIO sync manages on a tracked loan, switch tracking off instead of refusing,
+   * so the change sticks. Used for a lender's own reports: they may correct what FIO says about their loans.
+   */
+  untrackOnOverride?: boolean;
   now?: Date;
 }
 
@@ -349,6 +354,12 @@ async function tryUpdate(db: D1Database, id: number, input: Partial<LoanFields>,
       (before as Record<string, unknown>)[key] = current[key];
       (after as Record<string, unknown>)[key] = input[key];
     }
+  }
+  const overridesFio = (keys: (keyof LoanFields)[]) => keys.some((k) => !TRACKED_EDITABLE.includes(k === 'principalMinor' ? 'principal' : k));
+  const overrode = options.untrackOnOverride === true && current.autoTrack && after.autoTrack === undefined && overridesFio(Object.keys(after) as (keyof LoanFields)[]);
+  if (overrode) {
+    before.autoTrack = true;
+    after.autoTrack = false;
   }
   const changed = Object.keys(after) as (keyof LoanFields)[];
   if (changed.length === 0 && (options.trust === undefined || options.trust === row.trust)) return [];
@@ -397,7 +408,8 @@ async function tryUpdate(db: D1Database, id: number, input: Partial<LoanFields>,
     beforeJson['trust'] = row.trust;
     afterJson['trust'] = trust;
   }
-  if (options.reason) afterJson['reason'] = options.reason;
+  const reason = options.reason ?? (overrode ? 'Reported by the lender, overriding FIO, so no longer tracked from FIO' : undefined);
+  if (reason) afterJson['reason'] = reason;
   statements.push(
     db
       .prepare(
@@ -472,7 +484,8 @@ export interface ReportResult {
 /**
  * Records a loan a lender reports through the API. Idempotent by contract ID: the first report creates
  * the loan, later ones update it, and an identical one changes nothing. A lender can only report loans
- * recorded under their own name, and never one the FIO sync manages.
+ * recorded under their own name. Reporting different facts for a loan the FIO sync manages overrides FIO:
+ * tracking is switched off so the sync does not put FIO's values back (setLoanTracking turns it on again).
  */
 export async function reportLoan(db: D1Database, lender: { id: number; username: string }, rawContractId: string, input: Partial<LoanFields>): Promise<ReportResult> {
   // Normalised here as well as by callers, so "adv0001" and "ADV0001" can never become two loans.
@@ -502,8 +515,38 @@ export async function reportLoan(db: D1Database, lender: { id: number; username:
     throw new EditError('conflict', `Contract ${contractId} is already recorded under another lender (${existing.lender}).`);
   }
   if (existing.deleted_at) throw new EditError('conflict', `Contract ${contractId} was deleted from the bureau. Restore it on the site before reporting it again.`);
-  const changed = await updateLoan(db, existing.id, fields, editor);
+  const changed = await updateLoan(db, existing.id, fields, editor, { untrackOnOverride: true });
   return { loanId: existing.id, created: false, changed };
+}
+
+/** One of the lender's own loans, by contract ID. Refused if it is missing, another lender's, or deleted. */
+async function ownLoan(db: D1Database, lender: { username: string }, rawContractId: string) {
+  const contractId = normalizeContractId(rawContractId) ?? invalid('A contract ID is required.');
+  const existing = await db
+    .prepare('SELECT l.id, le.username AS lender, l.deleted_at, l.notes, l.auto_track FROM loans l JOIN lenders le ON le.id = l.lender_id WHERE l.contract_id = ?')
+    .bind(contractId)
+    .first<{ id: number; lender: string; deleted_at: string | null; notes: string | null; auto_track: number }>();
+  if (!existing) throw new EditError('not_found', `Contract ${contractId} is not in the bureau. Report it first, or wait for the FIO sync to bring it in.`);
+  if (existing.lender.toLowerCase() !== lender.username.toLowerCase()) {
+    throw new EditError('conflict', `Contract ${contractId} is recorded under another lender (${existing.lender}).`);
+  }
+  if (existing.deleted_at) throw new EditError('conflict', `Contract ${contractId} was deleted from the bureau.`);
+  return existing;
+}
+
+/**
+ * Switches FIO tracking on or off for one of a lender's own loans, through their API key. Turning it on hands the
+ * loan back to the sync, which updates its status from FIO from the next run; that needs the lender's FIO key connected.
+ */
+export async function setLoanTracking(db: D1Database, lender: { id: number; username: string }, rawContractId: string, autoTrack: boolean): Promise<{ loanId: number; changed: string[] }> {
+  const editor: Editor = { id: `lender:${lender.id}`, name: lender.username, kind: 'lender' };
+  const existing = await ownLoan(db, lender, rawContractId);
+  if (autoTrack && existing.auto_track !== 1) {
+    const connected = await db.prepare("SELECT 1 AS ok FROM lenders WHERE id = ? AND tracking_mode = 'fio' AND fio_key_enc IS NOT NULL").bind(lender.id).first();
+    if (!connected) throw new EditError('conflict', 'Connect your FIO account on the Track my loans page first, so the bureau can read this loan from FIO.');
+  }
+  const changed = await updateLoan(db, existing.id, { autoTrack }, editor);
+  return { loanId: existing.id, changed };
 }
 
 export type NotesChange =
@@ -513,21 +556,12 @@ export type NotesChange =
   | { append: string };
 
 /**
- * Sets the notes on one of a lender's own loans, through their API key. Unlike a report, this works on loans
- * kept up to date from FIO too: notes are the one thing the sync never touches. The loan must already exist.
+ * Sets the notes on one of a lender's own loans, through their API key. On a loan kept up to date from FIO this
+ * leaves tracking on, since notes are the one thing the sync never touches. The loan must already exist.
  */
 export async function setLoanNotes(db: D1Database, lender: { id: number; username: string }, rawContractId: string, change: NotesChange): Promise<{ loanId: number; changed: string[] }> {
-  const contractId = normalizeContractId(rawContractId) ?? invalid('A contract ID is required.');
   const editor: Editor = { id: `lender:${lender.id}`, name: lender.username, kind: 'lender' };
-  const existing = await db
-    .prepare('SELECT l.id, le.username AS lender, l.deleted_at, l.notes FROM loans l JOIN lenders le ON le.id = l.lender_id WHERE l.contract_id = ?')
-    .bind(contractId)
-    .first<{ id: number; lender: string; deleted_at: string | null; notes: string | null }>();
-  if (!existing) throw new EditError('not_found', `Contract ${contractId} is not in the bureau. Report it first, or wait for the FIO sync to bring it in.`);
-  if (existing.lender.toLowerCase() !== lender.username.toLowerCase()) {
-    throw new EditError('conflict', `Contract ${contractId} is recorded under another lender (${existing.lender}).`);
-  }
-  if (existing.deleted_at) throw new EditError('conflict', `Contract ${contractId} was deleted from the bureau.`);
+  const existing = await ownLoan(db, lender, rawContractId);
 
   const clean = (text: string | null): string | null => {
     const t = (text ?? '').trim();

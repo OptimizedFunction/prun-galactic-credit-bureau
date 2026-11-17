@@ -128,6 +128,7 @@ export function pastGrace(issuedOn: string, durationWeeks: number | null, now: D
  *   Stale once it is `graceDays` past maturity (measured from maturity, not issue date). Stale never
  *   replaces Complete, Breached or Terminated.
  * - Manual rows (autoTrack off) are never changed, except that a matching FIO contract marks them verified.
+ *   Tracked rows not labelled verified (handed back after a lender's report) are marked verified the same way.
  * - Lenders whose fetch failed are left entirely alone.
  */
 export function planSync(existing: ExistingLoan[], fetched: LenderLoans[], now: Date, graceDays = 91): Action[] {
@@ -147,18 +148,17 @@ export function planSync(existing: ExistingLoan[], fetched: LenderLoans[], now: 
       const stale = UNRESOLVED.includes(loan.status) && pastGrace(loan.issuedOn, loan.durationWeeks, now, graceDays);
       const status: Status = stale ? 'stale' : loan.status;
       const current = byId.get(loan.contractId);
+      // FIO confirms a row's facts when the lender, amount and currency agree.
+      const confirms = (l: ExistingLoan) =>
+        l.trust !== 'fio_verified' && l.lender.toLowerCase() === lender.toLowerCase() && l.principalMinor === loan.principalMinor && l.currency === loan.currency;
 
       if (!current) {
         actions.push({ kind: 'insert', lender, loan, status });
       } else if (!current.autoTrack) {
-        const matches =
-          current.lender.toLowerCase() === lender.toLowerCase() &&
-          current.principalMinor === loan.principalMinor &&
-          current.currency === loan.currency;
-        if (matches && current.trust !== 'fio_verified') {
-          actions.push({ kind: 'verify', loanId: current.id, contractId: current.contractId, loan });
-        }
+        if (confirms(current)) actions.push({ kind: 'verify', loanId: current.id, contractId: current.contractId, loan });
       } else {
+        // A loan handed back to the sync after a lender's report regains its label once FIO agrees.
+        if (confirms(current)) actions.push({ kind: 'verify', loanId: current.id, contractId: current.contractId, loan });
         if (current.status !== status && !(status === 'stale' && RESOLVED.includes(current.status))) {
           actions.push({ kind: 'status', loanId: current.id, contractId: current.contractId, from: current.status, to: status, loan });
         }

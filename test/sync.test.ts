@@ -143,6 +143,14 @@ test('plan: manual rows are never changed, only verified when FIO agrees', () =>
   assert.equal(planSync([{ ...manual, principalMinor: 5 }], [{ lender: 'Lena', loans: [loan('AAAAAAA', 'BREACHED')] }], DURING).length, 0);
 });
 
+test('plan: a tracked loan handed back after a lender report is verified again once FIO agrees', () => {
+  const handedBack = existing({ trust: 'lender_reported' });
+  const fio = [{ lender: 'Lena', loans: [loan('AAAAAAA', 'PARTIALLY_FULFILLED')] }];
+  assert.deepEqual(planSync([handedBack], fio, DURING).map((a) => a.kind), ['verify']);
+  // The lender reported a different amount: FIO does not confirm it, so the label stays.
+  assert.equal(planSync([{ ...handedBack, principalMinor: 5 }], fio, DURING).filter((a) => a.kind === 'verify').length, 0);
+});
+
 // ---- runSync against a real (temporary) D1 database ----
 
 const SECRET = 'test-secret';
