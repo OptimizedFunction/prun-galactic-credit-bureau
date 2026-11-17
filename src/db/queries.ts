@@ -56,7 +56,9 @@ const LOAN_SELECT = `
   SELECT l.id, l.contract_id, le.username AS lender, b.username AS borrower,
          l.borrower_company_code, l.borrower_corp_code, l.principal_minor, l.currency, l.issued_on,
          l.duration_weeks, l.loan_type, l.status, l.outstanding_minor, l.notes, l.trust, l.source,
-         l.auto_track, l.last_synced_at, l.updated_at, l.deleted_at,
+         l.auto_track, l.updated_at, l.deleted_at,
+         -- A loan FIO still returns was last checked when its lender was (migration 0010).
+         CASE WHEN l.fio_seen = 1 THEN COALESCE(le.fio_checked_at, l.last_synced_at) ELSE l.last_synced_at END AS last_synced_at,
          (l.status = 'breached' OR EXISTS (
             SELECT 1 FROM loan_status_history h WHERE h.loan_id = l.id AND h.new_status = 'breached'
          )) AS ever_breached

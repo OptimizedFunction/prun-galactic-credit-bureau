@@ -255,3 +255,42 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
     .first<Record<string, number>>();
   assert.deepEqual(counts, { loans: 4, history: 3, raw: 3 });
 });
+
+test('runSync writes nothing per loan while FIO keeps returning it, and notes when it stops', async () => {
+  const checked = (contractId: string) =>
+    db
+      .prepare(
+        `SELECT l.fio_seen, CASE WHEN l.fio_seen = 1 THEN COALESCE(le.fio_checked_at, l.last_synced_at) ELSE l.last_synced_at END AS checked, l.version
+         FROM loans l JOIN lenders le ON le.id = l.lender_id WHERE l.contract_id = ?`,
+      )
+      .bind(contractId)
+      .first<{ fio_seen: number; checked: string; version: number }>();
+  const run = (at: Date, ids: string[]) =>
+    runSync(db, { keySecret: SECRET }, {
+      now: at,
+      fetchLoans: async (_key, lender) =>
+        lender === 'Denied'
+          ? { lender, httpStatus: 401, contracts: null, error: 'FIO rejected the API key' }
+          : { lender, httpStatus: 200, error: null, contracts: ids.map((id) => contract(id, id === 'AAAAAAA' ? 'BREACHED' : 'PARTIALLY_FULFILLED')) },
+      fetchCompany: async () => null,
+    });
+
+  const t1 = new Date(DURING.getTime() + 2 * 3_600_000);
+  const t2 = new Date(DURING.getTime() + 3 * 3_600_000);
+  await run(t1, ['AAAAAAA', 'NEWLOAN']);
+  const before = await checked('NEWLOAN');
+  const raw = await db.prepare("SELECT fetched_at FROM fio_raw WHERE contract_id = 'NEWLOAN'").first<{ fetched_at: string }>();
+  assert.equal(before!.fio_seen, 1);
+  assert.equal(before!.checked, t1.toISOString(), 'last checked is the lender check');
+
+  // FIO stops returning NEWLOAN: it is marked as last seen at the previous check. AAAAAAA is untouched.
+  const aBefore = await checked('AAAAAAA');
+  await run(t2, ['AAAAAAA']);
+  assert.deepEqual(await checked('NEWLOAN'), { fio_seen: 0, checked: t1.toISOString(), version: before!.version });
+  const aAfter = await checked('AAAAAAA');
+  assert.equal(aAfter!.checked, t2.toISOString());
+  assert.equal(aAfter!.version, aBefore!.version, 'a loan FIO keeps returning is not rewritten');
+  // Unchanged FIO data is not rewritten either.
+  const rawAfter = await db.prepare("SELECT fetched_at FROM fio_raw WHERE contract_id = 'NEWLOAN'").first<{ fetched_at: string }>();
+  assert.equal(rawAfter!.fetched_at, raw!.fetched_at);
+});

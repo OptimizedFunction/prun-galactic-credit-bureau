@@ -90,13 +90,24 @@ export async function runSync(db: D1Database, keys: SyncKeys, deps: SyncDeps = {
     return { lender: r.lender, loans };
   });
 
+  // Only the loans this run can affect: every contract FIO returned (looked up by contract ID, so one already
+  // filed under another lender is still found), and the fetched lenders' own loans for the stale sweep.
+  const returnedIds = [...new Set([...kept.values()].flat().map((l) => l.contractId))];
+  const fetchedLenderIds = [...kept.keys()].map((name) => lenderIds.get(name)!);
   const existing = (
     await db
       .prepare(
         `SELECT l.id, l.contract_id, le.username AS lender, l.status, l.auto_track, l.trust, l.principal_minor,
                 l.currency, l.issued_on, l.duration_weeks
-         FROM loans l JOIN lenders le ON le.id = l.lender_id WHERE l.contract_id IS NOT NULL`,
+         FROM loans l JOIN lenders le ON le.id = l.lender_id
+         WHERE l.contract_id IN (SELECT value FROM json_each(?1))
+         UNION
+         SELECT l.id, l.contract_id, le.username AS lender, l.status, l.auto_track, l.trust, l.principal_minor,
+                l.currency, l.issued_on, l.duration_weeks
+         FROM loans l JOIN lenders le ON le.id = l.lender_id
+         WHERE l.lender_id IN (SELECT value FROM json_each(?2)) AND l.contract_id IS NOT NULL`,
       )
+      .bind(JSON.stringify(returnedIds), JSON.stringify(fetchedLenderIds))
       .all<{
         id: number;
         contract_id: string;
@@ -159,11 +170,13 @@ export async function runSync(db: D1Database, keys: SyncKeys, deps: SyncDeps = {
   }
 
   const statements: D1PreparedStatement[] = [];
+  // FIO's copy of a contract, rewritten only when it changed, so fetched_at is when this version was first seen.
   const rawUpsert = (loan: FioLoan, lenderId: number) =>
     db
       .prepare(
         `INSERT INTO fio_raw (contract_id, lender_id, fetched_at, payload) VALUES (?, ?, ?, ?)
-         ON CONFLICT (contract_id, lender_id) DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload`,
+         ON CONFLICT (contract_id, lender_id) DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload
+         WHERE fio_raw.payload IS NOT excluded.payload`,
       )
       .bind(loan.contractId, lenderId, nowIso, JSON.stringify(loan.raw));
 
@@ -187,8 +200,8 @@ export async function runSync(db: D1Database, keys: SyncKeys, deps: SyncDeps = {
           .prepare(
             `INSERT INTO loans (contract_id, lender_id, borrower_id, borrower_company_code, borrower_corp_code,
                principal_minor, currency, issued_on, duration_weeks, status, trust, source, auto_track,
-               last_synced_at, source_ref, created_at, updated_at)
-             VALUES (?, ?, (SELECT id FROM borrowers WHERE username = ?), ?, ?, ?, ?, ?, ?, ?, 'fio_verified', 'fio', 1, ?, ?, ?, ?)
+               last_synced_at, fio_seen, source_ref, created_at, updated_at)
+             VALUES (?, ?, (SELECT id FROM borrowers WHERE username = ?), ?, ?, ?, ?, ?, ?, ?, 'fio_verified', 'fio', 1, ?, 1, ?, ?, ?)
              ON CONFLICT (contract_id) DO NOTHING`,
           )
           .bind(a.loan.contractId, lenderId, b.username, companyCode, b.corpCode, a.loan.principalMinor, a.loan.currency, a.loan.issuedOn, a.loan.durationWeeks, a.status, nowIso, `fio:${a.loan.contractId}`, nowIso, nowIso),
@@ -244,15 +257,25 @@ export async function runSync(db: D1Database, keys: SyncKeys, deps: SyncDeps = {
     }
   }
 
-  // Per lender: mark returned loans as checked, and record the run.
+  // Per lender: note which loans FIO started or stopped returning, stamp the lender as checked, and record the run.
+  // Loans FIO keeps returning are not written at all: their "last checked" is the lender's (see migration 0010).
   for (const r of results) {
     const lenderId = lenderIds.get(r.lender.toLowerCase())!;
     const loans = kept.get(r.lender.toLowerCase());
-    if (loans && loans.length > 0) {
+    if (loans) {
+      const ids = JSON.stringify(loans.map((l) => l.contractId));
       statements.push(
+        // No longer returned: last seen at the lender's previous check (read before it is updated below).
         db
-          .prepare('UPDATE loans SET last_synced_at = ? WHERE auto_track = 1 AND lender_id = ? AND contract_id IN (SELECT value FROM json_each(?))')
-          .bind(nowIso, lenderId, JSON.stringify(loans.map((l) => l.contractId))),
+          .prepare(
+            `UPDATE loans SET fio_seen = 0, last_synced_at = COALESCE((SELECT fio_checked_at FROM lenders WHERE id = ?1), last_synced_at)
+             WHERE lender_id = ?1 AND fio_seen = 1 AND contract_id NOT IN (SELECT value FROM json_each(?2))`,
+          )
+          .bind(lenderId, ids),
+        db
+          .prepare('UPDATE loans SET fio_seen = 1, last_synced_at = ?3 WHERE auto_track = 1 AND lender_id = ?1 AND fio_seen = 0 AND contract_id IN (SELECT value FROM json_each(?2))')
+          .bind(lenderId, ids, nowIso),
+        db.prepare('UPDATE lenders SET fio_checked_at = ? WHERE id = ?').bind(nowIso, lenderId),
       );
     }
     statements.push(
