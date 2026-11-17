@@ -1,6 +1,8 @@
 // Discord sign-in. The session is a signed cookie; there is no session table.
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
+import { listConnectedBy } from './db/lenderKeys';
+import { getSyncHealth } from './db/queries';
 import type { Env } from './env';
 
 export interface SessionUser {
@@ -136,5 +138,22 @@ auth.get('/me', async (c) => {
   const user = await currentUser(c);
   // The picture is served by Discord's CDN; the page falls back to an initial if it fails to load.
   const avatarUrl = user?.avatar && /^\d+$/.test(user.id) ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64` : null;
-  return c.json({ user: user ? { id: user.id, name: user.name, avatarUrl } : null, signInAvailable: Boolean(c.env.DISCORD_CLIENT_ID && c.env.DISCORD_CLIENT_SECRET) });
+  // Lenders this user connected a FIO key for, and whether each key still works.
+  let lenders: { username: string; ok: boolean }[] = [];
+  if (user) {
+    const connected = await listConnectedBy(c.env.DB, user.id);
+    if (connected.length > 0) {
+      const health = await getSyncHealth(c.env.DB);
+      lenders = connected.map((l) => {
+        const sync = health.find((h) => h.lender.toLowerCase() === l.username.toLowerCase());
+        // No sync result yet means the first run is still on its way, which is not a failure.
+        return { username: l.username, ok: sync ? sync.ok : true };
+      });
+    }
+  }
+  return c.json({
+    user: user ? { id: user.id, name: user.name, avatarUrl } : null,
+    lenders,
+    signInAvailable: Boolean(c.env.DISCORD_CLIENT_ID && c.env.DISCORD_CLIENT_SECRET),
+  });
 });

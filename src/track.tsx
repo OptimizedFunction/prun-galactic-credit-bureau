@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import { currentUser } from './auth';
 import { listConnectedBy } from './db/lenderKeys';
+import { getSyncHealth } from './db/queries';
 import { Layout } from './pages';
 import type { Env } from './env';
 
@@ -40,8 +41,8 @@ const TRACK_SCRIPT = `
     try {
       const data = await call('POST', '/api/v1/fio-keys', { apiKey: form.apiKey.value.trim() });
       form.reset();
-      say('Connected ' + data.lender.username + '. FIO has ' + data.loansFound + ' loan' + (data.loansFound === 1 ? '' : 's') + ' you paid out; they will appear on your lender page within a minute.');
-      setTimeout(() => location.reload(), 4000);
+      say('Connected ' + data.lender.username + '. FIO has ' + data.loansFound + ' loan' + (data.loansFound === 1 ? '' : 's') + ' you paid out; taking you to My lending…');
+      setTimeout(() => (location.href = '/my-lending'), 3500);
     } catch (err) {
       say(err.message, true);
     } finally {
@@ -65,6 +66,8 @@ trackPages.get('/track', async (c) => {
   const user = await currentUser(c);
   const available = Boolean(c.env.FIO_KEY_SECRET);
   const connected = user ? await listConnectedBy(c.env.DB, user.id) : [];
+  const health = connected.length > 0 ? await getSyncHealth(c.env.DB) : [];
+  const syncOf = (username: string) => health.find((h) => h.lender.toLowerCase() === username.toLowerCase());
   c.header('Cache-Control', 'no-store');
 
   return c.html(
@@ -104,15 +107,29 @@ trackPages.get('/track', async (c) => {
           <h2>Connected by you</h2>
           <div class="panel">
             <ul class="plainlist">
-              {connected.map((l) => (
-                <li>
-                  <a href={`/lenders/${encodeURIComponent(l.username)}`}>{l.username}</a> <span class="muted">since {l.connectedAt.slice(0, 10)}</span>{' '}
-                  <button type="button" class="plain" data-disconnect={l.username}>
-                    Disconnect
-                  </button>
-                </li>
-              ))}
+              {connected.map((l) => {
+                const sync = syncOf(l.username);
+                return (
+                  <li>
+                    <a href={`/lenders/${encodeURIComponent(l.username)}`}>{l.username}</a> <span class="muted">since {l.connectedAt.slice(0, 10)}</span>{' '}
+                    {!sync ? (
+                      <span class="badge neutral">First sync on its way</span>
+                    ) : sync.ok ? (
+                      <span class="badge good">Key working</span>
+                    ) : (
+                      <span class="badge bad">{sync.error ?? 'Sync failing'}</span>
+                    )}{' '}
+                    <button type="button" class="plain" data-disconnect={l.username}>
+                      Disconnect
+                    </button>
+                    {sync && !sync.ok && <div class="muted">Paste a new key above to reconnect. Your recorded loans stay as they are meanwhile.</div>}
+                  </li>
+                );
+              })}
             </ul>
+            <p>
+              <a href="/my-lending">Go to My lending</a>
+            </p>
           </div>
         </>
       )}
