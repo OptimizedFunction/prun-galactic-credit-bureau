@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { currentUser, type SessionUser } from './auth';
+import * as admin from './db/admin';
 import * as edits from './db/edits';
 import * as lenderKeys from './db/lenderKeys';
 import * as q from './db/queries';
@@ -213,6 +214,7 @@ async function editor(c: Ctx): Promise<SessionUser> {
   if (!user) throw new ApiError(401, 'unauthorized', 'Sign in with Discord first.');
   // Reading your own connected lenders is not a write.
   if (c.req.method !== 'GET') {
+    if (await admin.isBlocked(c.env.DB, user.id)) throw new ApiError(403, 'blocked', 'This account has been blocked from making changes. Contact a maintainer if you think that is a mistake.');
     const take = await takeFromDb(c.env.DB, `user:${user.id}`, WRITE_LIMIT);
     if (!take.allowed) throw tooMany(take, WRITE_LIMIT, 'changes');
   }
@@ -359,6 +361,7 @@ async function lenderFromKey(c: Ctx): Promise<{ id: number; username: string }> 
   const key = /^Bearer\s+/i.test(header) ? header.replace(/^Bearer\s+/i, '').trim() : '';
   const lender = key ? await lenderKeys.lenderForApiKey(c.env.DB, key) : null;
   if (!lender) throw new ApiError(401, 'unauthorized', 'Send your lender API key as "Authorization: Bearer <key>".');
+  if (await admin.isBlocked(c.env.DB, `lender:${lender.id}`)) throw new ApiError(403, 'blocked', 'This lender key has been blocked from reporting. Contact a maintainer if you think that is a mistake.');
   const take = await takeFromDb(c.env.DB, `lender:${lender.id}`, WRITE_LIMIT);
   if (!take.allowed) throw tooMany(take, WRITE_LIMIT, 'reports');
   return lender;
@@ -390,4 +393,50 @@ api.delete('/lender-keys/:username', async (c) => {
   const user = await editor(c);
   await lenderKeys.revokeApiKey(c.env.DB, c.req.param('username'), user);
   return json({ ok: true });
+});
+
+// ---- Maintainers: block an account, roll back its changes ----
+
+async function maintainer(c: Ctx): Promise<SessionUser> {
+  const user = await editor(c);
+  if (!admin.isAdmin(c.env.ADMIN_DISCORD_IDS, user.id)) throw new ApiError(403, 'forbidden', 'Only maintainers can do this.');
+  return user;
+}
+
+const noStore = { 'Cache-Control': 'no-store' };
+
+api.get('/admin/blocks', async (c) => {
+  await maintainer(c);
+  return json({ blocks: await admin.listBlocks(c.env.DB) }, 200, noStore);
+});
+
+api.post('/admin/blocks', async (c) => {
+  const user = await maintainer(c);
+  const body = await jsonBody(c);
+  const actorId = typeof body['actorId'] === 'string' ? body['actorId'].trim() : '';
+  if (actorId === '' || actorId.length > 80) throw new ApiError(400, 'bad_request', '"actorId" is required: a Discord user ID, or "lender:<id>".');
+  if (actorId === user.id) throw new ApiError(400, 'bad_request', 'You cannot block yourself.');
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim().slice(0, 300) : null);
+  await admin.block(c.env.DB, actorId, text(body['name']), text(body['reason']), user);
+  return json({ blocks: await admin.listBlocks(c.env.DB) }, 201, noStore);
+});
+
+api.delete('/admin/blocks/:actorId', async (c) => {
+  await maintainer(c);
+  await admin.unblock(c.env.DB, c.req.param('actorId'));
+  return json({ blocks: await admin.listBlocks(c.env.DB) }, 200, noStore);
+});
+
+/** Undo everything one account changed since a moment in time. Fields someone else changed afterwards are left alone. */
+api.post('/admin/rollback', async (c) => {
+  const user = await maintainer(c);
+  const body = await jsonBody(c);
+  const actorId = typeof body['actorId'] === 'string' ? body['actorId'].trim() : '';
+  const since = typeof body['since'] === 'string' ? body['since'].trim() : '';
+  if (actorId === '') throw new ApiError(400, 'bad_request', '"actorId" is required: a Discord user ID, or "lender:<id>".');
+  if (actorId === 'system') throw new ApiError(400, 'bad_request', 'The system\'s own changes cannot be rolled back this way.');
+  if (Number.isNaN(Date.parse(since))) throw new ApiError(400, 'bad_request', '"since" must be an ISO 8601 time.');
+  const reason = typeof body['reason'] === 'string' && body['reason'].trim() !== '' ? body['reason'].trim().slice(0, 300) : undefined;
+  const result = await admin.rollbackActor(c.env.DB, actorId, new Date(since).toISOString(), user, reason);
+  return json(result, 200, noStore);
 });

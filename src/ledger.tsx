@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import ledgerScript from '../assets/ledger.client.js';
 import { currentUser } from './auth';
+import { isAdmin, listBlocks } from './db/admin';
 import * as q from './db/queries';
 import { Layout } from './pages';
 import { FIELD_LABELS, showValue } from './lib/changeText';
@@ -42,6 +43,11 @@ form.filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px;
 form.filters label { display: grid; gap: 2px; color: var(--muted); font-size: 13px; }
 form.filters input { min-width: 200px; padding: 7px 9px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 form.filters button { padding: 8px 14px; color: #fff; background: #1558b0; border: 0; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+details.panel.admin { margin: 0 0 16px; border-left: 4px solid #f2b84b; }
+details.panel.admin p { margin: 0 0 12px; }
+form.filters select { min-width: 220px; padding: 7px 9px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+form.filters button.danger { background: #b3261e; }
+ul.blocks { margin: 6px 0 0; padding-left: 20px; }
 details.columns { position: relative; }
 details.columns summary { padding: 7px 12px; color: var(--link); border: 1px solid var(--line); border-radius: 6px; font-size: 14px; cursor: pointer; list-style: none; user-select: none; }
 details.columns summary::-webkit-details-marker { display: none; }
@@ -221,6 +227,51 @@ function undoRequest(change: q.Change): { method: string; url: string; body?: un
   return null;
 }
 
+const ADMIN_SCRIPT = `
+(() => {
+  const form = document.getElementById('admin-form');
+  const msg = document.getElementById('admin-msg');
+  const say = (text, bad) => { msg.textContent = text; msg.style.color = bad ? 'var(--bad)' : 'var(--good)'; };
+  async function call(method, url, body) {
+    const res = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error?.message ?? 'Request failed (' + res.status + ').');
+    return data;
+  }
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const what = e.submitter.dataset.do;
+    const actorId = form.actorId.value;
+    const name = form.actorId.selectedOptions[0].textContent.trim();
+    const reason = form.reason.value.trim();
+    if (!actorId) return;
+    try {
+      if (what === 'block') {
+        if (!confirm('Block ' + name + ' from making any changes?')) return;
+        await call('POST', '/api/v1/admin/blocks', { actorId, name: name.replace(/ \\(.*$/, ''), reason });
+        location.reload();
+        return;
+      }
+      const since = new Date(form.since.value + 'Z').toISOString();
+      if (!confirm('Roll back everything ' + name + ' changed since ' + since + '?')) return;
+      const r = await call('POST', '/api/v1/admin/rollback', { actorId, since, reason });
+      say('Rolled back ' + r.loans + ' loan(s): ' + r.removed + ' removed, ' + r.restored + ' restored, ' + r.reverted + ' reverted.' + (r.skipped.length ? ' Left alone (changed by others since): ' + r.skipped.join('; ') + '.' : ''));
+    } catch (err) {
+      say(err.message, true);
+    }
+  });
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-unblock]');
+    if (!btn) return;
+    try {
+      await call('DELETE', '/api/v1/admin/blocks/' + encodeURIComponent(btn.dataset.unblock));
+      location.reload();
+    } catch (err) {
+      say(err.message, true);
+    }
+  });
+})();`;
+
 const UNDO_SCRIPT = `
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('button.undo');
@@ -244,6 +295,10 @@ ledgerPages.get('/changes', async (c) => {
     currentUser(c),
     q.listChanges(c.env.DB, { includeSystem, actor, loan, limit: size + 1, offset: (page - 1) * size }),
   ]);
+  const maintainer = user !== null && isAdmin(c.env.ADMIN_DISCORD_IDS, user.id);
+  const blocks = maintainer ? await listBlocks(c.env.DB) : [];
+  // The accounts behind the changes on this page, for the maintainer tools: one name can hide several accounts.
+  const accounts = [...new Map(changes.filter((ch) => ch.actorType !== 'system' && ch.actorId).map((ch) => [ch.actorId!, ch.actor])).entries()];
   const more = changes.length > size;
   const query = (extra: Record<string, string | number | undefined>) => {
     const params = new URLSearchParams();
@@ -272,6 +327,59 @@ ledgerPages.get('/changes', async (c) => {
           </>
         )}
       </p>
+      {maintainer && (
+        <details class="panel admin" open={filtered}>
+          <summary>Maintainer tools</summary>
+          <p class="muted">
+            Roll back undoes everything an account changed since the time given: loans it added are deleted, loans it deleted come back, and fields it
+            changed return to what they held before. Anything someone else has changed since is left alone.
+          </p>
+          <form class="filters" id="admin-form">
+            <label>
+              Account
+              <select name="actorId" required>
+                {accounts.length === 0 && <option value="">No accounts on this page</option>}
+                {accounts.map(([id, name]) => (
+                  <option value={id}>
+                    {name} ({id})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Since (UTC)
+              <input name="since" type="datetime-local" required value={new Date(Date.now() - 86_400_000).toISOString().slice(0, 16)} />
+            </label>
+            <label>
+              Reason
+              <input name="reason" maxlength={300} placeholder="Shown in each loan's history" />
+            </label>
+            <button type="submit" data-do="rollback">
+              Roll back
+            </button>
+            <button type="submit" data-do="block" class="danger">
+              Block account
+            </button>
+          </form>
+          <p id="admin-msg" role="status"></p>
+          {blocks.length > 0 && (
+            <>
+              <strong>Blocked accounts</strong>
+              <ul class="blocks">
+                {blocks.map((b) => (
+                  <li>
+                    {b.name ?? 'Unknown'} <span class="muted">({b.actorId})</span> · blocked {b.blockedAt.slice(0, 10)} by {b.blockedBy}
+                    {b.reason && <> · {b.reason}</>}{' '}
+                    <button type="button" class="undo" data-unblock={b.actorId}>
+                      Unblock
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </details>
+      )}
       <form class="filters" method="get" action="/changes">
         <label>
           By
@@ -356,6 +464,7 @@ ledgerPages.get('/changes', async (c) => {
         {page > 1 && <a href={link(page - 1)}>← Newer</a>} {more && <a href={link(page + 1)}>Older →</a>}
       </p>
       <script dangerouslySetInnerHTML={{ __html: UNDO_SCRIPT }} />
+      {maintainer && <script dangerouslySetInnerHTML={{ __html: ADMIN_SCRIPT }} />}
     </Layout>,
   );
 });

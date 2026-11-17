@@ -12,3 +12,7 @@ FIO_API_KEY=
 # Discord OAuth application, for sign-in.
 DISCORD_CLIENT_ID=
 DISCORD_CLIENT_SECRET=
+
+# Discord user IDs of maintainers, comma-separated. They can block accounts and roll back their changes.
+# (In Discord: Settings > Advanced > Developer Mode, then right-click your name > Copy User ID.)
+ADMIN_DISCORD_IDS=
