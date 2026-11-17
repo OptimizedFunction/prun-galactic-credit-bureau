@@ -557,3 +557,38 @@ export async function listLoansUpdatedSince(db: D1Database, since: string, limit
   const { results } = await db.prepare(`${LOAN_SELECT} WHERE l.updated_at >= ? ORDER BY l.updated_at, l.id LIMIT ?`).bind(since, limit).all<LoanRow>();
   return results.map(toLoan);
 }
+
+export interface CompanyMatch {
+  username: string;
+  companyCode: string | null;
+  corpCode: string | null;
+}
+
+/**
+ * Finds the player a username or company code refers to. More than one result means a company code
+ * that has been recorded against several players.
+ */
+export async function findCompanies(db: D1Database, id: string, by: 'username' | 'code'): Promise<CompanyMatch[]> {
+  const sql =
+    by === 'username'
+      ? `SELECT username, company_code, corp_code, 0 AS rank FROM borrowers
+           WHERE username = ?1 OR id = (SELECT borrower_id FROM borrower_aliases WHERE alias = ?1)
+         UNION ALL
+         SELECT username, company_code, NULL, 1 FROM lenders WHERE username = ?1
+         ORDER BY rank`
+      : `SELECT username, company_code, corp_code, 0 AS rank FROM borrowers
+           WHERE company_code = ?1 OR id IN (SELECT borrower_id FROM loans WHERE borrower_company_code = ?1 AND deleted_at IS NULL)
+         UNION ALL
+         SELECT username, company_code, NULL, 1 FROM lenders WHERE company_code = ?1
+         ORDER BY rank`;
+  const { results } = await db.prepare(sql).bind(id).all<{ username: string; company_code: string | null; corp_code: string | null }>();
+  // A player can be both borrower and lender; the borrower row comes first and carries the fuller identity.
+  const byName = new Map<string, CompanyMatch>();
+  for (const r of results) {
+    const key = r.username.toLowerCase();
+    const have = byName.get(key);
+    if (!have) byName.set(key, { username: r.username, companyCode: r.company_code, corpCode: r.corp_code });
+    else have.companyCode ??= r.company_code;
+  }
+  return [...byName.values()];
+}

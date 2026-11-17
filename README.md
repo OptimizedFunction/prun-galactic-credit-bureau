@@ -87,6 +87,7 @@ Discord developer portal.
 The contract is [openapi.yaml](openapi.yaml). Examples:
 
 ```
+GET /api/v1/companies/{username or company code}   a company's whole record, as borrower and lender
 GET /api/v1/borrowers/{username}        exposure per currency + all loans
 GET /api/v1/search?q={name or company code}
 GET /api/v1/lenders/{username}/loans

@@ -78,6 +78,80 @@ paths:
                         loans: { type: integer }
         '400': { $ref: '#/components/responses/Error' }
 
+  /companies/{id}:
+    get:
+      tags: [Borrowers]
+      summary: Everything on record about one company
+      description: |
+        Looks a player up by in-game username or by company code and returns their record both as a
+        borrower and as a lender. Without `by`, the identifier is tried as a username first, then as a
+        company code. Company codes match the borrower's current code and the code recorded on any of
+        their loans.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: An in-game username or a company code.
+          schema: { type: string }
+        - name: by
+          in: query
+          description: Force how the identifier is read.
+          schema: { type: string, enum: [username, code] }
+      responses:
+        '200':
+          description: The company's record. `asBorrower` or `asLender` is null when there is nothing on that side.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [company, matchedBy, asBorrower, asLender]
+                properties:
+                  company:
+                    type: object
+                    required: [username, companyCode, corpCode, aliases]
+                    properties:
+                      username: { type: string }
+                      companyCode: { type: [string, 'null'] }
+                      corpCode: { type: [string, 'null'] }
+                      aliases:
+                        type: array
+                        items: { type: string }
+                  matchedBy: { type: string, enum: [username, code] }
+                  asBorrower:
+                    oneOf:
+                      - type: 'null'
+                      - $ref: '#/components/schemas/CompanySide'
+                  asLender:
+                    oneOf:
+                      - type: 'null'
+                      - allOf:
+                          - $ref: '#/components/schemas/CompanySide'
+                          - type: object
+                            required: [trackingMode]
+                            properties:
+                              trackingMode: { $ref: '#/components/schemas/TrackingMode' }
+        '300':
+          description: The company code has been recorded against more than one player. Ask again by username.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    required: [matches]
+                    properties:
+                      matches:
+                        type: array
+                        items:
+                          type: object
+                          required: [username, companyCode, corpCode]
+                          properties:
+                            username: { type: string }
+                            companyCode: { type: [string, 'null'] }
+                            corpCode: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
   /borrowers/{username}:
     get:
       tags: [Borrowers]
@@ -810,6 +884,21 @@ components:
         overdueLoans: { type: integer }
         terminatedLoans: { type: integer }
 
+    CompanySide:
+      type: object
+      description: One side of a company's record, as borrower or as lender.
+      required: [exposure, combined, loans, totalLoans]
+      properties:
+        exposure:
+          type: array
+          items: { $ref: '#/components/schemas/Exposure' }
+        combined: { $ref: '#/components/schemas/Combined' }
+        loans:
+          description: Newest first, up to 500. Use /loans with a lender or borrower filter to page through more.
+          type: array
+          items: { $ref: '#/components/schemas/Loan' }
+        totalLoans: { type: integer }
+
     Combined:
       type: object
       description: |
@@ -881,5 +970,5 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, fio_unreachable, unavailable, internal_error] }
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, ambiguous, fio_unreachable, unavailable, internal_error] }
             message: { type: string }

@@ -98,6 +98,48 @@ api.get('/borrowers/:username', async (c) => {
   return json({ borrower, exposure, combined: q.combine(exposure), loans });
 });
 
+/**
+ * Everything on record about one company, as borrower and as lender, found by in-game username or company code.
+ * Without `by`, the identifier is tried as a username first and then as a company code.
+ */
+api.get('/companies/:id', async (c) => {
+  const id = c.req.param('id').trim();
+  const by = c.req.query('by');
+  if (by !== undefined && by !== 'username' && by !== 'code') throw new ApiError(400, 'bad_request', '"by" must be "username" or "code".');
+
+  let matchedBy: 'username' | 'code' = by ?? 'username';
+  let matches = await q.findCompanies(c.env.DB, id, matchedBy);
+  if (matches.length === 0 && by === undefined) {
+    matchedBy = 'code';
+    matches = await q.findCompanies(c.env.DB, id, 'code');
+  }
+  if (matches.length === 0) throw new ApiError(404, 'not_found', 'Nothing is recorded under this username or company code.');
+  if (matches.length > 1) {
+    return json({ error: { code: 'ambiguous', message: `Company code ${id.toUpperCase()} has been recorded against more than one player. Ask for one of them by username.` }, matches }, 300);
+  }
+
+  const match = matches[0]!;
+  const [borrower, lender] = await Promise.all([q.getBorrower(c.env.DB, match.username), q.getLender(c.env.DB, match.username)]);
+  const [asBorrower, asLender] = await Promise.all([
+    borrower
+      ? Promise.all([q.getBorrowerExposure(c.env.DB, borrower.id), q.listLoans(c.env.DB, { borrower: borrower.username, limit: 500, offset: 0 })]).then(
+          ([exposure, { loans, total }]) => ({ exposure, combined: q.combine(exposure), loans, totalLoans: total }),
+        )
+      : null,
+    lender
+      ? Promise.all([q.getLenderExposure(c.env.DB, lender.id), q.listLoans(c.env.DB, { lender: lender.username, limit: 500, offset: 0 })]).then(
+          ([exposure, { loans, total }]) => ({ trackingMode: lender.trackingMode, exposure, combined: q.combine(exposure), loans, totalLoans: total }),
+        )
+      : null,
+  ]);
+  return json({
+    company: { username: match.username, companyCode: match.companyCode ?? lender?.companyCode ?? null, corpCode: match.corpCode, aliases: borrower?.aliases ?? [] },
+    matchedBy,
+    asBorrower,
+    asLender,
+  });
+});
+
 api.get('/lenders', async (c) => {
   const lenders = await q.listLenders(c.env.DB);
   return json({ lenders: lenders.map((l) => ({ ...l, combined: q.combine(l.exposure) })) });

@@ -138,6 +138,20 @@ test('combined figures add the cash currencies and leave non-cash loans out of t
   assert.equal(q.combine([]).total, '0.00');
 });
 
+test('a company is found by username or by company code, as borrower and lender', async () => {
+  await createLoan(db, parseLoanFields({ lender: 'Lena', borrower: 'Frank', companyCode: 'FRK', principal: '1', currency: 'AIC', issuedOn: '2026-06-01', status: 'Complete' }), ANN);
+  // A second player recorded under the same code on one loan, and Frank also lends.
+  await createLoan(db, parseLoanFields({ lender: 'Frank', borrower: 'Gina', companyCode: 'GIN', principal: '1', currency: 'AIC', issuedOn: '2026-06-02', status: 'Complete' }), ANN);
+  await createLoan(db, parseLoanFields({ lender: 'Lena', borrower: 'Hank', companyCode: 'GIN', principal: '1', currency: 'AIC', issuedOn: '2026-06-03', status: 'Complete' }), ANN);
+
+  assert.deepEqual(await q.findCompanies(db, 'frank', 'username'), [{ username: 'Frank', companyCode: 'FRK', corpCode: null }]);
+  assert.deepEqual(await q.findCompanies(db, 'frk', 'code'), [{ username: 'Frank', companyCode: 'FRK', corpCode: null }]);
+  assert.deepEqual((await q.findCompanies(db, 'GIN', 'code')).map((m) => m.username).sort(), ['Gina', 'Hank']);
+  assert.deepEqual(await q.findCompanies(db, 'FRK', 'username'), []);
+  // A lender with no borrowing is still found by name.
+  assert.deepEqual((await q.findCompanies(db, 'lena', 'username')).map((m) => m.username), ['Lena']);
+});
+
 test('sessions are signed: tampered, foreign and expired cookies are rejected', async () => {
   const now = Date.parse('2026-11-17T00:00:00Z');
   const cookie = await signSession(ANN, 'secret-a', now);
