@@ -121,6 +121,23 @@ test('deleting hides a loan from lists and totals, and it can be restored', asyn
   assert.deepEqual(changes.map((c) => [c.action, c.actor, c.borrower]), [['update', 'ann', 'Dave'], ['delete', 'ben', 'Dave'], ['create', 'ann', 'Dave']]);
 });
 
+test('combined figures add the cash currencies and leave non-cash loans out of the amounts', async () => {
+  const id = await createLoan(db, parseLoanFields({ lender: 'Mixer', borrower: 'Eve', principal: '1,000,000', currency: 'AIC', issuedOn: '2026-05-01', status: 'In Progress' }), ANN);
+  await createLoan(db, parseLoanFields({ lender: 'Mixer', borrower: 'Eve', principal: '2,500,000', currency: 'NCC', issuedOn: '2026-05-02', status: 'Breached' }), ANN);
+  await createLoan(db, parseLoanFields({ lender: 'Mixer', borrower: 'Eve', principal: '4,000,000', currency: 'NCC', issuedOn: '2026-05-03', status: 'Terminated' }), ANN);
+  await createLoan(db, parseLoanFields({ lender: 'Mixer', borrower: 'Eve', principal: '9,000,000', currency: 'N/A', issuedOn: '2026-05-04', status: 'Overdue' }), ANN);
+  assert.ok(id > 0);
+
+  const eve = (await q.getBorrower(db, 'Eve'))!;
+  const all = q.combine(await q.getBorrowerExposure(db, eve.id));
+  assert.deepEqual(
+    { loans: all.loans, nonCash: all.nonCashLoans, total: all.total, current: all.current, breached: all.breachedLoans, overdue: all.overdueLoans, terminated: all.terminatedLoans },
+    // Total leaves out the terminated loan; the non-cash loan adds to counts but to no amount.
+    { loans: 3, nonCash: 1, total: '3500000.00', current: '1000000.00', breached: 1, overdue: 1, terminated: 1 },
+  );
+  assert.equal(q.combine([]).total, '0.00');
+});
+
 test('sessions are signed: tampered, foreign and expired cookies are rejected', async () => {
   const now = Date.parse('2026-11-17T00:00:00Z');
   const cookie = await signSession(ANN, 'secret-a', now);

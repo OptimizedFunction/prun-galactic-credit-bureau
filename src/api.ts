@@ -77,7 +77,10 @@ function loanFilter(query: Record<string, string>): q.LoanFilter {
   };
 }
 
-api.get('/stats', async (c) => json(await q.getTotals(c.env.DB)));
+api.get('/stats', async (c) => {
+  const totals = await q.getTotals(c.env.DB);
+  return json({ ...totals, combined: q.combine(totals.exposure) });
+});
 
 api.get('/search', async (c) => {
   const term = (c.req.query('q') ?? '').trim();
@@ -92,15 +95,19 @@ api.get('/borrowers/:username', async (c) => {
     q.getBorrowerExposure(c.env.DB, borrower.id),
     q.listLoans(c.env.DB, { borrower: borrower.username, limit: 500, offset: 0 }),
   ]);
-  return json({ borrower, exposure, loans });
+  return json({ borrower, exposure, combined: q.combine(exposure), loans });
 });
 
-api.get('/lenders', async (c) => json({ lenders: await q.listLenders(c.env.DB) }));
+api.get('/lenders', async (c) => {
+  const lenders = await q.listLenders(c.env.DB);
+  return json({ lenders: lenders.map((l) => ({ ...l, combined: q.combine(l.exposure) })) });
+});
 
 api.get('/lenders/:username', async (c) => {
   const lender = await q.getLender(c.env.DB, c.req.param('username'));
   if (!lender) throw new ApiError(404, 'not_found', 'No such lender.');
-  return json({ lender, exposure: await q.getLenderExposure(c.env.DB, lender.id) });
+  const exposure = await q.getLenderExposure(c.env.DB, lender.id);
+  return json({ lender, exposure, combined: q.combine(exposure) });
 });
 
 api.get('/lenders/:username/loans', async (c) => {

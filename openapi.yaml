@@ -18,7 +18,8 @@ info:
 
     Conventions:
     - Amounts are decimal strings (`"25000000.00"`) and always come with a currency. Amounts in
-      different currencies are never added together, except in the combined leaderboard.
+      different currencies are never added together, except in fields named `combined`, which add the
+      four currencies at face value with no exchange rate applied. Treat those as a rough measure of scale.
     - `currency` is one of `AIC`, `CIS`, `ICA`, `NCC`, or `null` for lending that is not cash
       (for example a loan repaid in materials).
     - Usernames, company codes and contract IDs are case-insensitive.
@@ -91,9 +92,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [borrower, exposure, loans]
+                required: [borrower, exposure, combined, loans]
                 properties:
                   borrower: { $ref: '#/components/schemas/Borrower' }
+                  combined: { $ref: '#/components/schemas/Combined' }
                   exposure:
                     type: array
                     items: { $ref: '#/components/schemas/Exposure' }
@@ -123,9 +125,10 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [username, trackingMode, loans, exposure]
+                      required: [username, trackingMode, loans, exposure, combined]
                       properties:
                         username: { type: string }
+                        combined: { $ref: '#/components/schemas/Combined' }
                         trackingMode: { $ref: '#/components/schemas/TrackingMode' }
                         loans: { type: integer, description: Cash loans only. }
                         exposure:
@@ -145,9 +148,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [lender, exposure]
+                required: [lender, exposure, combined]
                 properties:
                   lender: { $ref: '#/components/schemas/Lender' }
+                  combined: { $ref: '#/components/schemas/Combined' }
                   exposure:
                     type: array
                     items: { $ref: '#/components/schemas/Exposure' }
@@ -559,8 +563,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [loans, lenders, borrowers, exposure]
+                required: [loans, lenders, borrowers, exposure, combined]
                 properties:
+                  combined: { $ref: '#/components/schemas/Combined' }
                   loans: { type: integer }
                   lenders: { type: integer }
                   borrowers: { type: integer }
@@ -802,6 +807,23 @@ components:
         stale: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: Outcome unknown. }
         breachedLoans: { type: integer, description: Loans in breach now. }
         everBreachedLoans: { type: integer, description: Loans that are or ever were in breach. }
+        overdueLoans: { type: integer }
+        terminatedLoans: { type: integer }
+
+    Combined:
+      type: object
+      description: |
+        Figures across all four currencies, added at face value with no exchange rate applied.
+        A rough measure of scale; the per-currency figures in `exposure` are the exact ones.
+      required: [loans, nonCashLoans, total, current, stale, breachedLoans, everBreachedLoans, overdueLoans, terminatedLoans]
+      properties:
+        loans: { type: integer, description: Cash loans, including terminated ones. }
+        nonCashLoans: { type: integer, description: Loans with no currency. Not included in any amount. }
+        total: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: Everything lent, leaving out terminated loans. }
+        current: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: In Progress plus Overdue. }
+        stale: { allOf: [{ $ref: '#/components/schemas/Amount' }], description: Outcome unknown. }
+        breachedLoans: { type: integer }
+        everBreachedLoans: { type: integer }
         overdueLoans: { type: integer }
         terminatedLoans: { type: integer }
 

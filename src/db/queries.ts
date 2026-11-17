@@ -233,6 +233,50 @@ function toExposure(r: ExposureRow): Exposure {
   };
 }
 
+/**
+ * Figures across all four currencies, added at face value with no exchange rate applied.
+ * A rough measure of scale; the per-currency figures are the exact ones.
+ */
+export interface Combined {
+  /** Cash loans (in one of the four currencies), including terminated ones. */
+  loans: number;
+  /** Loans with no currency, e.g. repaid in materials. Not included in any amount. */
+  nonCashLoans: number;
+  total: string;
+  totalMinor: number;
+  current: string;
+  currentMinor: number;
+  stale: string;
+  staleMinor: number;
+  breachedLoans: number;
+  everBreachedLoans: number;
+  overdueLoans: number;
+  terminatedLoans: number;
+}
+
+export function combine(exposure: Exposure[]): Combined {
+  const cash = exposure.filter((e) => e.currency !== null);
+  const sum = (rows: Exposure[], pick: (e: Exposure) => number) => rows.reduce((n, e) => n + pick(e), 0);
+  const totalMinor = sum(cash, (e) => e.totalMinor);
+  const currentMinor = sum(cash, (e) => e.currentMinor);
+  const staleMinor = sum(cash, (e) => e.staleMinor);
+  return {
+    loans: sum(cash, (e) => e.loans),
+    nonCashLoans: sum(exposure, (e) => e.loans) - sum(cash, (e) => e.loans),
+    total: minorToDecimal(totalMinor),
+    totalMinor,
+    current: minorToDecimal(currentMinor),
+    currentMinor,
+    stale: minorToDecimal(staleMinor),
+    staleMinor,
+    // Counts cover every loan, cash or not.
+    breachedLoans: sum(exposure, (e) => e.breachedLoans),
+    everBreachedLoans: sum(exposure, (e) => e.everBreachedLoans),
+    overdueLoans: sum(exposure, (e) => e.overdueLoans),
+    terminatedLoans: sum(exposure, (e) => e.terminatedLoans),
+  };
+}
+
 export interface Borrower {
   id: number;
   username: string;
