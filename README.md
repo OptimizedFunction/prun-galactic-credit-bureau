@@ -25,6 +25,7 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | My lending (a connected lender's own view, with key health) | Done |
 | Lender API keys and the report endpoint | Done |
 | Token-bucket rate limiting on the API | Done |
+| Blocking accounts and rolling back their changes | Done |
 | Deployment | Not started (runs locally only) |
 
 ## Run it locally
@@ -97,6 +98,28 @@ curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract or own refe
 Reports are idempotent by contract ID, labelled Lender-reported, and listed in Recent changes like any edit.
 Only the key's hash is stored.
 
+## Recovering from abuse
+
+Every change to a loan is stored as a revision: who made it, and the values before and after. That log is
+the version history, and three tools build on it, from lightest to heaviest:
+
+1. **Undo one change.** Any signed-in user, from Recent changes.
+2. **Block an account and roll back everything it did.** Maintainers only, from the Maintainer tools panel on
+   Recent changes (filter by the person first). A rollback deletes loans the account added, restores loans it
+   deleted and puts back the fields it changed, since a time you choose. Fields someone else has changed since
+   are left alone and listed. Lender API keys can be blocked and rolled back the same way.
+3. **Restore the whole database.** D1 keeps 30 days of history (Time Travel). To go back to a moment:
+
+   ```sh
+   npx wrangler d1 time-travel info bureau --timestamp=2026-11-17T10:00:00Z
+   npx wrangler d1 time-travel restore bureau --timestamp=2026-11-17T10:00:00Z
+   ```
+
+   This rewinds everything, including honest edits made after that moment, so prefer step 2 when one account
+   is the problem. `npm run db:backup` saves a full SQL copy of the live database to `data/`.
+
+Maintainers are the Discord user IDs listed in `ADMIN_DISCORD_IDS` (comma-separated).
+
 ## API
 
 The contract is [openapi.yaml](openapi.yaml). Examples:
@@ -133,7 +156,7 @@ src/auth.ts      Discord sign-in and the signed session cookie
 src/track.tsx    Track my loans page (lenders connect a FIO key)
 src/me.tsx       My lending page
 assets/          Logo and the ledger's browser script
-src/db/          Database queries and edits
+src/db/          Database queries, edits, lender keys, blocking and rollback
 src/sync/        FIO sync: client, decision rules, database writes
 src/lib/         Shared pure helpers (amounts, IDs, statuses)
 scripts/         Sheet download, import and verification

@@ -45,6 +45,8 @@ tags:
     description: Lenders connecting their own FIO API key. Needs a Discord sign-in.
   - name: Reporting
     description: Needs a lender API key.
+  - name: Maintainers
+    description: Blocking accounts and rolling back their changes. Needs a maintainer's Discord sign-in.
 
 paths:
   /search:
@@ -517,6 +519,105 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /admin/blocks:
+    get:
+      tags: [Maintainers]
+      summary: Accounts blocked from making changes
+      security:
+        - session: []
+      responses:
+        '200':
+          description: The blocked accounts.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockList' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [Maintainers]
+      summary: Block an account
+      description: A blocked account can still read everything but every write it attempts is refused with 403.
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId]
+              properties:
+                actorId: { type: string, description: 'A Discord user ID, or "lender:<id>" for a lender API key.' }
+                name: { type: string }
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '201':
+          description: Blocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockList' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /admin/blocks/{actorId}:
+    delete:
+      tags: [Maintainers]
+      summary: Unblock an account
+      security:
+        - session: []
+      parameters:
+        - name: actorId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Unblocked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockList' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /admin/rollback:
+    post:
+      tags: [Maintainers]
+      summary: Undo everything one account changed since a moment in time
+      description: |
+        For each loan the account touched: a loan it added is deleted, a loan it deleted is restored, and
+        each field it changed returns to what it held before the account's first change in the period.
+        A field someone else has changed since is left alone and listed in `skipped`. The rollback is
+        recorded in each loan's history as the system, with the reason. Running it twice is harmless.
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actorId, since]
+              properties:
+                actorId: { type: string, description: 'A Discord user ID, or "lender:<id>" for a lender API key.' }
+                since: { type: string, format: date-time }
+                reason: { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: What was done.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loans, removed, restored, reverted, skipped]
+                properties:
+                  loans: { type: integer, description: Loans the account touched in the period. }
+                  removed: { type: integer, description: Loans it had added, now deleted. }
+                  restored: { type: integer, description: Loans it had deleted, now back. }
+                  reverted: { type: integer, description: Loans with at least one field put back. }
+                  skipped:
+                    type: array
+                    items: { type: string }
+                    description: 'Fields left alone because someone else changed them since, e.g. "loan #12: status".'
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+
   /updates:
     get:
       tags: [Bureau]
@@ -978,6 +1079,22 @@ components:
         overdueLoans: { type: integer }
         terminatedLoans: { type: integer }
 
+    BlockList:
+      type: object
+      required: [blocks]
+      properties:
+        blocks:
+          type: array
+          items:
+            type: object
+            required: [actorId, name, reason, blockedBy, blockedAt]
+            properties:
+              actorId: { type: string }
+              name: { type: [string, 'null'] }
+              reason: { type: [string, 'null'] }
+              blockedBy: { type: string }
+              blockedAt: { type: string, format: date-time }
+
     CompanySide:
       type: object
       description: One side of a company's record, as borrower or as lender.
@@ -1029,7 +1146,7 @@ components:
       properties:
         id: { type: integer }
         action: { type: string, enum: [import, create, update, delete] }
-        actorType: { type: string, enum: [system, lender, user] }
+        actorType: { type: string, enum: [system, lender, user], description: A Discord user, a lender through their API key, or a bureau job. }
         actor: { type: string, description: 'Discord username, or the name of the system job.' }
         actorId: { type: [string, 'null'], description: Discord user ID; null for system changes. }
         before: { description: Values before the change; null for the first version. }
@@ -1064,5 +1181,5 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, ambiguous, rate_limited, fio_unreachable, unavailable, internal_error] }
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, blocked, not_found, conflict, ambiguous, rate_limited, fio_unreachable, unavailable, internal_error] }
             message: { type: string }
