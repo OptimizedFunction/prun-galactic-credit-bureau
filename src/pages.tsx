@@ -332,8 +332,7 @@ export const Layout = (props: { title: string; description?: string; wide?: bool
         {props.children}
       </main>
       <footer>
-        A public record of lending in Prosperous Universe. Amounts are in-game currency. Combined figures add the four currencies at face value, with no
-        exchange rate applied.
+        A public record of lending in Prosperous Universe. Amounts are in-game currency.
       </footer>
       <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
       <script dangerouslySetInnerHTML={{ __html: PAGE_SCRIPT }} />
@@ -430,7 +429,6 @@ const MoneyStat = ({ label, combinedMinor, exposure, pick }: { label: string; co
           {parts.length === 1 && <span class="unit"> {parts[0]!.currency}</span>}
         </>
       }
-      note={parts.length > 1 ? 'all currencies, at face value' : undefined}
     >
       {parts.length > 1 && (
         <ul class="parts">
@@ -799,7 +797,6 @@ pages.get('/lenders', async (c) => {
       <p class="sub">
         Everyone who has lent, and what each has out on loan today. Lend yourself? <a href="/track">Track your loans automatically</a>.
       </p>
-      <p class="hint">“Out now” adds the four currencies at face value, with no exchange rate applied. The currency columns hold the exact amounts.</p>
       <div class="scroll">
         <table class="stack">
           <thead>
@@ -1097,12 +1094,6 @@ pages.get('/leaderboards', async (c) => {
           <button type="submit">Show</button>
         </noscript>
       </form>
-      {currency === null && (
-        <p class="hint">
-          Combined figures add AIC, CIS, ICA and NCC together at face value, with no exchange rate applied. Read them as a rough measure of scale;
-          pick a currency for exact amounts.
-        </p>
-      )}
       <div class="cols">
         <Board title="Total lent, all time" entries={board.byTotal} />
         <Board title="Out on loan now" entries={board.byCurrent} />
@@ -1189,6 +1180,11 @@ pages.get('/about', (c) =>
           <dt>Community-edited</dt>
           <dd>Entered or changed by someone else. See the loan's version history.</dd>
         </dl>
+        <h2>Combined amounts</h2>
+        <p>
+          Where a page shows one figure for several currencies, it is AIC, CIS, ICA and NCC added together as they are, with no exchange rate. The
+          amounts per currency are listed beside it.
+        </p>
         <h2>Automatic tracking</h2>
         <p>
           Lenders can <a href="/track">connect their FIO account</a>. The bureau then reads their loan contracts every hour and keeps each loan's
