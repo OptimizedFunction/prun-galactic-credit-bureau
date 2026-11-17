@@ -122,7 +122,8 @@ Maintainers are the Discord user IDs listed in `ADMIN_DISCORD_IDS` (comma-separa
 
 ## API
 
-The contract is [openapi.yaml](openapi.yaml). Examples:
+The contract is [openapi.yaml](openapi.yaml). The site serves it at `/openapi.yaml` and renders it as an
+interactive reference at `/api` (Swagger UI, loaded from cdnjs). Examples:
 
 ```
 GET /api/v1/companies/{username or company code}   a company's whole record, as borrower and lender
@@ -151,6 +152,7 @@ openapi.yaml     API contract
 src/index.tsx    Worker entry (Hono)
 src/api.ts       JSON API
 src/pages.tsx    Server-rendered pages
+src/apidocs.tsx  API reference page
 src/ledger.tsx   Editable ledger and Recent changes pages
 src/auth.ts      Discord sign-in and the signed session cookie
 src/track.tsx    Track my loans page (lenders connect a FIO key)

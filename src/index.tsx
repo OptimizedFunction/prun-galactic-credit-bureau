@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { api } from './api';
+import { apiDocs } from './apidocs';
 import { auth } from './auth';
 import { ledgerPages } from './ledger';
 import { mePages } from './me';
@@ -13,6 +14,7 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.route('/api/v1', api);
 app.route('/auth', auth);
+app.route('/', apiDocs);
 app.route('/', ledgerPages);
 app.route('/', trackPages);
 app.route('/', mePages);

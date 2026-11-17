@@ -9,3 +9,9 @@ declare module '*.client.js' {
   const content: string;
   export default content;
 }
+
+// The API description, served as-is at /openapi.yaml.
+declare module '*.yaml' {
+  const content: string;
+  export default content;
+}

@@ -404,6 +404,7 @@ export const Layout = (props: { title: string; description?: string; wide?: bool
             <a href="/lenders">Lenders</a>
             <a href="/leaderboards">Leaderboards</a>
             <a href="/changes">Changes</a>
+            <a href="/api">API</a>
             <a href="/about">About</a>
           </nav>
           <script dangerouslySetInnerHTML={{ __html: NAV_SCRIPT }} />
@@ -1467,8 +1468,8 @@ The <a href="/lenders">Lenders</a> page shows when each tracked lender was last 
       <section class="panel about" id="api">
         <h2>API</h2>
         <p>
-          Everything on this site is also served as JSON under <a href="/api/v1/stats">/api/v1</a>, no key required. For example{' '}
-          <code>/api/v1/borrowers/&#123;username&#125;</code>.
+          Everything on this site is also served as JSON, no key required. The <a href="/api">API page</a> lists every endpoint with examples and lets
+          you try each one.
         </p>
       </section>
     </Layout>,

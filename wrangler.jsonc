@@ -4,8 +4,8 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-04-01",
   "observability": { "enabled": true },
-  // Lets the Worker import the logo and the browser-side ledger script as strings.
-  "rules": [{ "type": "Text", "globs": ["**/*.svg", "**/*.client.js"], "fallthrough": true }],
+  // Lets the Worker import the logo, the browser-side ledger script and the API description as strings.
+  "rules": [{ "type": "Text", "globs": ["**/*.svg", "**/*.client.js", "**/*.yaml"], "fallthrough": true }],
   // FIO sync, hourly. To test locally: "npm run dev:cron", then open /__scheduled.
   "triggers": { "crons": ["0 * * * *"] },
   "d1_databases": [
