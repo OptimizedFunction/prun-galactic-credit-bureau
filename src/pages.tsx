@@ -4,7 +4,8 @@ import { html } from 'hono/html';
 import type { Child } from 'hono/jsx';
 import logoSvg from '../assets/logo.svg';
 import * as q from './db/queries';
-import { CURRENCIES, formatMinor, isCurrency, STATUS_LABELS, type Status } from './lib/normalize';
+import { describeRevision, TRUST_HELP, TRUST_LABELS, type ChangeLine, type Trust } from './lib/changeText';
+import { CURRENCIES, formatMinor, isCurrency, STATUS_LABELS, STATUSES, type Status } from './lib/normalize';
 import type { Env } from './env';
 
 export const pages = new Hono<{ Bindings: Env }>();
@@ -123,6 +124,31 @@ pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px
 .stat ul.parts span { display: inline-block; width: 36px; color: var(--muted); }
 .stat ul.names { display: flex; flex-wrap: wrap; gap: 2px 10px; }
 .fresh { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.trust { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.trust svg { flex: none; }
+.trust.fio_verified { color: var(--good); }
+h2.flush { margin-top: 0; }
+.cols > .panel h2 { font-size: 16px; margin: 20px 0 6px; }
+.cols > .panel h2.flush { margin-top: 0; }
+.cols > .panel p { margin: 0 0 8px; }
+dl.facts.small { margin-top: 8px; font-size: 13px; gap: 3px 16px; }
+ol.timeline { margin: 0 0 0 6px; padding: 0; list-style: none; border-left: 2px solid var(--line); }
+ol.timeline li { position: relative; padding: 0 0 18px 20px; }
+ol.timeline li:last-child { padding-bottom: 0; }
+ol.timeline li::before { content: ""; position: absolute; left: -7px; top: 5px; width: 8px; height: 8px; background: var(--bg); border: 2px solid var(--neutral); border-radius: 50%; }
+ol.timeline li.person::before { border-color: var(--link); background: var(--link); }
+.timeline .when { color: var(--muted); font-size: 13px; }
+.timeline .what { font-weight: 600; }
+.timeline .line { font-size: 14px; overflow-wrap: anywhere; }
+.timeline .from { color: var(--muted); }
+.timeline details { margin-top: 4px; font-size: 13px; }
+.timeline summary { color: var(--link); cursor: pointer; }
+nav.contents { display: flex; flex-wrap: wrap; gap: 6px 8px; margin: 0 0 16px; }
+nav.contents a { padding: 4px 12px; font-size: 14px; background: var(--chip); border-radius: 999px; }
+.panel.about { margin-bottom: 12px; scroll-margin-top: 76px; }
+.panel.about h2 { margin-top: 0; }
+.panel.about p:last-child, .panel.about ul:last-child { margin-bottom: 0; }
+.panel.about dt { scroll-margin-top: 76px; }
 .titlebar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
 button.ghost { min-height: 34px; padding: 6px 14px; color: var(--link); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }
 button.ghost:hover { background: var(--chip); }
@@ -349,12 +375,58 @@ const STATUS_TONE: Record<Status, string> = {
   stale: 'warn',
 };
 
-const StatusBadge = ({ status }: { status: Status }) => <span class={`badge ${STATUS_TONE[status]}`}>{STATUS_LABELS[status]}</span>;
+/** One sentence on what each status means. Shown on hover and on the About page. */
+const STATUS_HELP: Record<Status, string> = {
+  in_progress: 'Paid out and being repaid.',
+  overdue: 'A payment deadline has passed.',
+  breached: 'The contract was breached in game.',
+  complete: 'Fully repaid.',
+  terminated: 'Ended early: a cancelled offer or a negotiated exit. Not counted in totals.',
+  stale: 'Long past maturity and FIO no longer reports it, so the outcome is unknown.',
+};
 
-const TRUST_LABELS: Record<q.Loan['trust'], string> = {
-  fio_verified: 'FIO-verified',
-  lender_reported: 'Lender-reported',
-  community_edited: 'Community-edited',
+const StatusBadge = ({ status }: { status: Status }) => (
+  <span class={`badge ${STATUS_TONE[status]}`} title={STATUS_HELP[status]}>
+    {STATUS_LABELS[status]}
+  </span>
+);
+
+const TRUST_ICONS: Record<Trust, Child> = {
+  // A tick in a circle: checked against the game.
+  fio_verified: (
+    <>
+      <circle cx="8" cy="8" r="6.6" />
+      <path d="M5 8.3l2.1 2.1 4-4.4" />
+    </>
+  ),
+  // A person: the lender's own word.
+  lender_reported: (
+    <>
+      <circle cx="8" cy="5.6" r="2.6" />
+      <path d="M2.9 13.6c.8-2.7 2.8-4 5.1-4s4.3 1.3 5.1 4" />
+    </>
+  ),
+  // A pencil: typed in by hand.
+  community_edited: <path d="M2.8 13.2l.7-3L10.7 3l2.3 2.3-7.2 7.2-3 .7z" />,
+};
+
+/** Where a loan's information came from: an icon and a word, linked to the explanation. `plain` drops the link. */
+const TrustMark = ({ trust, plain }: { trust: Trust; plain?: boolean }) => {
+  const body = (
+    <>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        {TRUST_ICONS[trust]}
+      </svg>
+      {TRUST_LABELS[trust]}
+    </>
+  );
+  return plain ? (
+    <span class={`trust ${trust}`}>{body}</span>
+  ) : (
+    <a class={`trust ${trust}`} href={`/about#trust-${trust}`} title={TRUST_HELP[trust]}>
+      {body}
+    </a>
+  );
 };
 
 const Money = ({ minor, currency }: { minor: number; currency: string | null }) => (
@@ -516,8 +588,8 @@ const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrow
                 </span>
               </td>
               <td data-label="Contract">{l.contractId ?? <span class="muted">–</span>}</td>
-              <td class="muted" data-label="Trust">
-                {TRUST_LABELS[l.trust]}
+              <td data-label="Trust">
+                <TrustMark trust={l.trust} />
               </td>
               <td class="wrap" data-label="Notes">
                 {l.notes ?? ''}
@@ -725,7 +797,7 @@ pages.get('/borrowers/:username', async (c) => {
     all.breachedLoans > 0 ? 'bad' : all.overdueLoans > 0 || all.everBreachedLoans > 0 || all.staleMinor > 0 ? 'warn' : all.currentMinor > 0 ? 'neutral' : 'good';
   const caveats = [
     all.overdueLoans > 0 && `${plural(all.overdueLoans, 'loan')} overdue.`,
-    all.staleMinor > 0 && `${formatMinor(all.staleMinor)} in loans whose outcome is unknown.`,
+    all.staleMinor > 0 && `${formatMinor(all.staleMinor)} in stale loans, whose outcome is unknown.`,
     all.nonCashLoans > 0 && `${plural(all.nonCashLoans, 'non-cash loan')} not counted in the amounts.`,
   ].filter(Boolean);
 
@@ -921,6 +993,45 @@ pages.get('/lenders/:username', async (c) => {
   );
 });
 
+interface TimelineEvent {
+  at: string;
+  who: string;
+  /** True for a person, false for the sync or the import. */
+  person: boolean;
+  summary: string;
+  lines: ChangeLine[];
+  note: string | null;
+  /** The untouched sheet row, for imported loans. */
+  raw: Record<string, string> | null;
+}
+
+const SYSTEM_ACTORS: Record<string, string> = { 'fio-sync': 'FIO sync', 'sheet-import': 'Import from the Google Sheet' };
+const HISTORY_SOURCES: Record<string, string> = { fio_sync: 'FIO sync', sheet_import: "The Google Sheet's sync", edit: 'Edited by hand', api: 'Lender report' };
+
+/** One list, newest first, of everything that happened to a loan: status changes and edits together. */
+function loanTimeline(history: q.StatusChange[], revisions: q.Revision[]): TimelineEvent[] {
+  const events: TimelineEvent[] = revisions.map((r) => {
+    const text = describeRevision(r);
+    const raw = r.action === 'import' && r.after && typeof r.after === 'object' ? (r.after as Record<string, string>) : null;
+    return { at: r.createdAt, who: r.actorType === 'user' ? r.actor : (SYSTEM_ACTORS[r.actor] ?? r.actor), person: r.actorType === 'user', ...text, raw };
+  });
+  // A hand edit or an added loan writes both a revision and a status row at the same instant; show it once.
+  const revisionTimes = new Set(revisions.map((r) => r.createdAt));
+  for (const h of history) {
+    if (revisionTimes.has(h.changedAt) && (h.source === 'edit' || h.oldStatus === null)) continue;
+    events.push({
+      at: h.changedAt,
+      who: HISTORY_SOURCES[h.source] ?? h.source,
+      person: false,
+      summary: h.oldStatus === null ? `First recorded as ${STATUS_LABELS[h.newStatus]}` : 'Status changed',
+      lines: h.oldStatus === null ? [] : [{ label: 'Status', from: STATUS_LABELS[h.oldStatus], to: STATUS_LABELS[h.newStatus] }],
+      note: null,
+      raw: null,
+    });
+  }
+  return events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
 pages.get('/loans/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const loan = Number.isInteger(id) && id > 0 ? await q.getLoan(c.env.DB, id) : null;
@@ -929,111 +1040,131 @@ pages.get('/loans/:id', async (c) => {
     return c.html(<NotFound what="No such loan." />);
   }
   const [history, revisions] = await Promise.all([q.getLoanHistory(c.env.DB, id), q.getRevisions(c.env.DB, 'loan', id)]);
+  const timeline = loanTimeline(history, revisions);
+  const name = loan.contractId ?? `#${loan.id}`;
+  const ledgerLink = `/ledger?q=${encodeURIComponent(loan.contractId ?? loan.borrower.username)}`;
+  const amount = `${formatMinor(loan.principalMinor)}${loan.currency ? ` ${loan.currency}` : ''}`;
+
   return c.html(
-    <Layout title={`Loan ${loan.contractId ?? `#${loan.id}`}`}>
-      <h1>
-        Loan {loan.contractId ?? `#${loan.id}`} <StatusBadge status={loan.status} />
-      </h1>
-      <p class="sub">
-        <a href={lenderUrl(loan.lender)}>{loan.lender}</a> lent to <a href={borrowerUrl(loan.borrower.username)}>{loan.borrower.username}</a>
-      </p>
-      <div class="panel">
-        <dl class="facts">
-          <dt>Amount</dt>
-          <dd>
-            <Money minor={loan.principalMinor} currency={loan.currency} />
-          </dd>
-          <dt>Issued</dt>
-          <dd>{loan.issuedOn}</dd>
-          <dt>Duration</dt>
-          <dd>{loan.durationWeeks === null ? 'Unknown' : `${Number(loan.durationWeeks.toFixed(2))} weeks`}</dd>
-          <dt>Matures</dt>
-          <dd>{loan.maturesOn ?? 'Unknown'}</dd>
-          <dt>Borrower company</dt>
-          <dd>
-            {loan.borrower.companyCode ?? 'Unknown'} · corp {loan.borrower.corpCode ?? 'none'}
-          </dd>
-          <dt>Contract ID</dt>
-          <dd>{loan.contractId ?? 'None recorded'}</dd>
-          <dt>Trust</dt>
-          <dd>{TRUST_LABELS[loan.trust]}</dd>
-          {loan.deletedAt && (
-            <>
-              <dt>Deleted</dt>
-              <dd>This loan was deleted on {loan.deletedAt.slice(0, 10)} and is left out of lists and totals. It can be restored from <a href="/changes">Recent changes</a>.</dd>
-            </>
-          )}
-          <dt>Tracking</dt>
-          <dd>{loan.autoTrack ? `Automatic${loan.lastSyncedAt ? `, last checked ${stamp(loan.lastSyncedAt)}` : ''}` : 'Manual entry'}</dd>
-          {loan.everBreached && loan.status !== 'breached' && (
-            <>
-              <dt>Breach</dt>
-              <dd>This loan was breached at some point and later changed status.</dd>
-            </>
-          )}
-          {loan.notes && (
-            <>
-              <dt>Notes</dt>
-              <dd>{loan.notes}</dd>
-            </>
-          )}
-        </dl>
-      </div>
-      <p>
-        <a href={`/ledger?q=${encodeURIComponent(loan.contractId ?? loan.borrower.username)}`}>Edit in the ledger</a>
-      </p>
-      <h2>Status history</h2>
-      {history.length === 0 ? (
-        <p class="muted">No status changes recorded yet.</p>
-      ) : (
-        <div class="scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>From</th>
-                <th>To</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((h) => (
-                <tr>
-                  <td>{stamp(h.changedAt)}</td>
-                  <td>{h.oldStatus ? <StatusBadge status={h.oldStatus} /> : <span class="muted">first seen</span>}</td>
-                  <td>
-                    <StatusBadge status={h.newStatus} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <Layout
+      title={`Loan ${name}`}
+      description={`${loan.lender} lent ${amount} to ${loan.borrower.username} on ${loan.issuedOn}. Status: ${STATUS_LABELS[loan.status]}. ${TRUST_LABELS[loan.trust]}.`}
+    >
+      <div class="titlebar">
+        <div>
+          <h1>
+            Loan {name} <StatusBadge status={loan.status} />
+          </h1>
+          <p class="sub">
+            <a href={lenderUrl(loan.lender)}>{loan.lender}</a> lent {amount} to <a href={borrowerUrl(loan.borrower.username)}>{loan.borrower.username}</a>
+          </p>
         </div>
-      )}
-      <h2>Version history</h2>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Who</th>
-              <th>Change</th>
-              <th>Recorded values</th>
-            </tr>
-          </thead>
-          <tbody>
-            {revisions.map((r) => (
-              <tr>
-                <td>{day(r.createdAt)}</td>
-                <td>{r.actor}</td>
-                <td>{r.action === 'import' ? 'Imported from the sheet' : r.action === 'create' ? 'Added' : r.action === 'delete' ? 'Deleted' : 'Changed'}</td>
-                <td class="wrap">
-                  <pre>{JSON.stringify(r.after ?? r.before, null, 1)}</pre>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <CopyLink />
       </div>
+
+      {loan.deletedAt && (
+        <p class="panel alert">
+          <strong>This loan was deleted on {loan.deletedAt.slice(0, 10)}.</strong> It is left out of lists and totals. Anyone signed in can restore it from{' '}
+          <a href="/changes">Recent changes</a>.
+        </p>
+      )}
+
+      <div class="cols">
+        <div class="panel">
+          <dl class="facts">
+            <dt>Amount</dt>
+            <dd>
+              <Money minor={loan.principalMinor} currency={loan.currency} />
+            </dd>
+            <dt>Status</dt>
+            <dd>
+              <StatusBadge status={loan.status} /> <span class="muted">{STATUS_HELP[loan.status]}</span>
+              {loan.everBreached && loan.status !== 'breached' && <div class="muted">It was in breach at some point and changed status later.</div>}
+            </dd>
+            <dt>Issued</dt>
+            <dd>{loan.issuedOn}</dd>
+            <dt>Duration</dt>
+            <dd>{loan.durationWeeks === null ? 'Unknown' : `${Number(loan.durationWeeks.toFixed(2))} weeks`}</dd>
+            <dt>Matures</dt>
+            <dd>{loan.maturesOn ?? 'Unknown'}</dd>
+            <dt>Borrower company</dt>
+            <dd>
+              {loan.borrower.companyCode ?? 'Unknown'} · corp {loan.borrower.corpCode ?? 'none'}
+            </dd>
+            <dt>Contract ID</dt>
+            <dd>{loan.contractId ?? 'None recorded'}</dd>
+            {loan.notes && (
+              <>
+                <dt>Notes</dt>
+                <dd>{loan.notes}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+
+        <div class="panel">
+          <h2 class="flush">Where this comes from</h2>
+          <p>
+            <TrustMark trust={loan.trust} /> {TRUST_HELP[loan.trust]}
+          </p>
+          <p class="muted">
+            {loan.autoTrack
+              ? `Kept up to date from FIO${loan.lastSyncedAt ? `; last checked ${stamp(loan.lastSyncedAt)}` : ''}.`
+              : 'A manual entry. The FIO sync does not update it.'}
+          </p>
+          <h2>Think this is wrong?</h2>
+          {loan.autoTrack ? (
+            <p>
+              This record mirrors the in-game contract, so its status, amount and dates follow the game and cannot be changed by hand. If the contract
+              itself is the problem, take it up with <a href={lenderUrl(loan.lender)}>{loan.lender}</a>. Anyone signed in can still add context in the
+              notes, <a href={ledgerLink}>in the ledger</a>.
+            </p>
+          ) : (
+            <p>
+              Anyone signed in with Discord can correct this entry <a href={ledgerLink}>in the ledger</a>, whether you are the lender, the borrower or
+              someone who knows better. Every change is listed below under your name and can be undone.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <h2>History</h2>
+      {timeline.length === 0 ? (
+        <p class="muted">Nothing recorded yet.</p>
+      ) : (
+        <ol class="timeline">
+          {timeline.map((e) => (
+            <li class={e.person ? 'person' : undefined}>
+              <div class="when">
+                {stamp(e.at)} · {e.who}
+              </div>
+              <div class="what">{e.summary}</div>
+              {e.lines.map((line) => (
+                <div class="line">
+                  {line.label}: {line.from !== null && <span class="from">{line.from} → </span>}
+                  <strong>{line.to}</strong>
+                </div>
+              ))}
+              {e.note && <div class="line muted">{e.note}</div>}
+              {e.raw && (
+                <details>
+                  <summary>The sheet row as imported</summary>
+                  <dl class="facts small">
+                    {Object.entries(e.raw)
+                      .filter(([, value]) => value !== '')
+                      .map(([key, value]) => (
+                        <>
+                          <dt>{key}</dt>
+                          <dd>{value}</dd>
+                        </>
+                      ))}
+                  </dl>
+                </details>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
     </Layout>,
   );
 });
@@ -1148,60 +1279,122 @@ pages.get('/sync', async (c) => {
 
 pages.get('/about', (c) =>
   c.html(
-    <Layout title="About">
+    <Layout title="About" description="How the PrUn Galactic Credit Bureau works: what the statuses and trust labels mean, how loans are tracked and how to correct a record.">
       <h1>About the bureau</h1>
-      <div class="panel">
-        <p>
-          The PrUn Galactic Credit Bureau gathers the loans that lenders report into one public record, so anyone can see what a borrower
-          already owes and how their past loans ended. Reporting is voluntary, and everything here is public.
-        </p>
+      <p class="sub">
+        The PrUn Galactic Credit Bureau gathers the loans that lenders report into one public record, so anyone can see what a borrower already owes and
+        how their past loans ended. Reporting is voluntary, and everything here is public.
+      </p>
+      <nav class="contents" aria-label="On this page">
+        <a href="#what">What is recorded</a>
+        <a href="#statuses">Statuses</a>
+        <a href="#trust">Trust labels</a>
+        <a href="#combined">Combined amounts</a>
+        <a href="#tracking">Automatic tracking</a>
+        <a href="#editing">Editing</a>
+        <a href="#disputes">If a record about you is wrong</a>
+        <a href="#api">API</a>
+      </nav>
+
+      <section class="panel about" id="what">
+        <h2>What is recorded</h2>
         <p>Three kinds of lending belong here: in-game loan contracts, advances paid for goods yet to be delivered, and sponsored bases.</p>
+        <p>
+          The bureau only knows what lenders tell it. A player with no record has not necessarily never borrowed; it means no reporting lender has lent
+          to them.
+        </p>
+      </section>
+
+      <section class="panel about" id="statuses">
         <h2>Statuses</h2>
         <dl class="facts">
-          <dt>In Progress</dt>
-          <dd>Paid out and being repaid.</dd>
-          <dt>Overdue</dt>
-          <dd>A payment deadline has passed.</dd>
-          <dt>Breached</dt>
-          <dd>The contract was breached in game.</dd>
-          <dt>Complete</dt>
-          <dd>Fully repaid.</dd>
-          <dt>Terminated</dt>
-          <dd>Ended early: a cancelled offer or a negotiated exit. Not counted in totals.</dd>
-          <dt>Stale</dt>
-          <dd>Long past maturity and FIO no longer reports it, so the outcome is unknown.</dd>
+          {STATUSES.map((s) => (
+            <>
+              <dt id={`status-${s}`}>
+                <StatusBadge status={s} />
+              </dt>
+              <dd>{STATUS_HELP[s]}</dd>
+            </>
+          ))}
         </dl>
+        <p class="muted">
+          A loan that was once in breach keeps a “was breached” mark even after its status changes, because the status history is never erased.
+        </p>
+      </section>
+
+      <section class="panel about" id="trust">
         <h2>Trust labels</h2>
+        <p>Every loan says where its information came from.</p>
         <dl class="facts">
-          <dt>FIO-verified</dt>
-          <dd>The contract was checked against FIO game data.</dd>
-          <dt>Lender-reported</dt>
-          <dd>Sent by the lender, not verified.</dd>
-          <dt>Community-edited</dt>
-          <dd>Entered or changed by someone else. See the loan's version history.</dd>
+          {(Object.keys(TRUST_LABELS) as Trust[]).map((t) => (
+            <>
+              <dt id={`trust-${t}`}>
+                <TrustMark trust={t} plain />
+              </dt>
+              <dd>{TRUST_HELP[t]}</dd>
+            </>
+          ))}
         </dl>
+        <p class="muted">
+          Changing a loan's facts by hand relabels it Community-edited. If the FIO sync later finds the same contract with the same lender, amount and
+          currency, it becomes FIO-verified again.
+        </p>
+      </section>
+
+      <section class="panel about" id="combined">
         <h2>Combined amounts</h2>
         <p>
           Where a page shows one figure for several currencies, it is AIC, CIS, ICA and NCC added together as they are, with no exchange rate. The
           amounts per currency are listed beside it.
         </p>
+      </section>
+
+      <section class="panel about" id="tracking">
         <h2>Automatic tracking</h2>
         <p>
-          Lenders can <a href="/track">connect their FIO account</a>. The bureau then reads their loan contracts every hour and keeps each loan's
-          status current without anyone typing it in.
+          Lenders can <a href="/track">connect their FIO account</a>. The bureau then reads their loan contracts every hour and keeps each loan's status
+          current without anyone typing it in. Only loans the lender paid out are recorded; loans they received are reported by their own lenders.
         </p>
+        <p>
+          <a href="/sync">Sync health</a> shows when each tracked lender was last read.
+        </p>
+      </section>
+
+      <section class="panel about" id="editing">
         <h2>Editing</h2>
         <p>
-          Sign in with Discord and you can add, correct or remove any loan in the <a href="/ledger">ledger</a>. Each change is recorded under your
-          name in <a href="/changes">Recent changes</a>, where anyone signed in can undo it. Loans with Auto track ticked follow FIO, so only
-          their notes are open to editing.
+          Sign in with Discord and you can add, correct or remove any loan in the <a href="/ledger">ledger</a>. Each change is recorded under your name
+          in <a href="/changes">Recent changes</a>, where anyone signed in can undo it. Loans with Auto track ticked follow FIO, so only their notes are
+          open to editing.
         </p>
+      </section>
+
+      <section class="panel about" id="disputes">
+        <h2>If a record about you is wrong</h2>
+        <p>Open the loan from your borrower page. Its page says where the record came from and shows everything that has happened to it.</p>
+        <ul class="next">
+          <li>
+            <strong>A manual entry</strong> can be corrected by anyone signed in, including you. Your change is public and can be undone, so say why in
+            the notes.
+          </li>
+          <li>
+            <strong>A loan tracked from FIO</strong> mirrors the in-game contract and cannot be edited by hand. If the contract is the problem, settle it
+            with the lender in game; the record follows. You can still add a note.
+          </li>
+          <li>
+            <strong>A loan that is not yours</strong>, such as one recorded under a similar name, should be corrected in the ledger or raised with the
+            lender named on it.
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel about" id="api">
         <h2>API</h2>
         <p>
           Everything on this site is also served as JSON under <a href="/api/v1/stats">/api/v1</a>, no key required. For example{' '}
           <code>/api/v1/borrowers/&#123;username&#125;</code>.
         </p>
-      </div>
+      </section>
     </Layout>,
   ),
 );
