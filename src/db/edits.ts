@@ -55,6 +55,9 @@ export class EditError extends Error {
   }
 }
 
+/** Longest notes a loan can carry. */
+const NOTES_MAX = 2000;
+
 const invalid = (message: string): never => {
   throw new EditError('invalid', message);
 };
@@ -138,7 +141,7 @@ export function parseLoanFields(raw: Record<string, unknown>): Partial<LoanField
   if ('notes' in raw) {
     const v = raw['notes'];
     if (blank(v)) out.notes = null;
-    else if (typeof v !== 'string' || v.length > 2000) invalid('Notes must be text of at most 2,000 characters.');
+    else if (typeof v !== 'string' || v.length > NOTES_MAX) invalid('Notes must be text of at most 2,000 characters.');
     else out.notes = v.trim();
   }
   return out;
@@ -501,6 +504,53 @@ export async function reportLoan(db: D1Database, lender: { id: number; username:
   if (existing.deleted_at) throw new EditError('conflict', `Contract ${contractId} was deleted from the bureau. Restore it on the site before reporting it again.`);
   const changed = await updateLoan(db, existing.id, fields, editor);
   return { loanId: existing.id, created: false, changed };
+}
+
+export type NotesChange =
+  /** Replace the notes. With `expected`, only if they still read that (null = there were none). */
+  | { notes: string | null; expected?: string | null }
+  /** Add a line at the end, keeping whatever is there. */
+  | { append: string };
+
+/**
+ * Sets the notes on one of a lender's own loans, through their API key. Unlike a report, this works on loans
+ * kept up to date from FIO too: notes are the one thing the sync never touches. The loan must already exist.
+ */
+export async function setLoanNotes(db: D1Database, lender: { id: number; username: string }, rawContractId: string, change: NotesChange): Promise<{ loanId: number; changed: string[] }> {
+  const contractId = normalizeContractId(rawContractId) ?? invalid('A contract ID is required.');
+  const editor: Editor = { id: `lender:${lender.id}`, name: lender.username, kind: 'lender' };
+  const existing = await db
+    .prepare('SELECT l.id, le.username AS lender, l.deleted_at, l.notes FROM loans l JOIN lenders le ON le.id = l.lender_id WHERE l.contract_id = ?')
+    .bind(contractId)
+    .first<{ id: number; lender: string; deleted_at: string | null; notes: string | null }>();
+  if (!existing) throw new EditError('not_found', `Contract ${contractId} is not in the bureau. Report it first, or wait for the FIO sync to bring it in.`);
+  if (existing.lender.toLowerCase() !== lender.username.toLowerCase()) {
+    throw new EditError('conflict', `Contract ${contractId} is recorded under another lender (${existing.lender}).`);
+  }
+  if (existing.deleted_at) throw new EditError('conflict', `Contract ${contractId} was deleted from the bureau.`);
+
+  const clean = (text: string | null): string | null => {
+    const t = (text ?? '').trim();
+    if (t.length > NOTES_MAX) invalid('Notes must be text of at most 2,000 characters.');
+    return t === '' ? null : t;
+  };
+  if ('append' in change) {
+    const line = clean(change.append) ?? invalid('Say what to add ("append").');
+    // Built on the notes as read, and refused if someone changed them in between, so nothing is lost.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = attempt === 0 ? existing.notes : (await db.prepare('SELECT notes FROM loans WHERE id = ?').bind(existing.id).first<{ notes: string | null }>())!.notes;
+      try {
+        const changed = await updateLoan(db, existing.id, { notes: clean(current ? `${current}\n${line}` : line) }, editor, { expected: { notes: current } });
+        return { loanId: existing.id, changed };
+      } catch (err) {
+        if (!(err instanceof EditError && err.kind === 'conflict' && attempt < 2)) throw err;
+      }
+    }
+  }
+  const replace = change as { notes: string | null; expected?: string | null };
+  const expected = 'expected' in replace ? { expected: { notes: clean(replace.expected ?? null) } } : {};
+  const changed = await updateLoan(db, existing.id, { notes: clean(replace.notes) }, editor, expected);
+  return { loanId: existing.id, changed };
 }
 
 /** A loan's current values in the form revisions store them, plus its trust label and whether it is deleted. */

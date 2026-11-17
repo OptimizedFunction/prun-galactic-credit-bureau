@@ -272,7 +272,8 @@ paths:
         changed. `lender`, `contractId` and `autoTrack` in the body are ignored.
 
         Refused with 409 when the contract is recorded under another lender, is kept up to date from FIO,
-        or was deleted from the bureau.
+        or was deleted from the bureau. To add notes to a loan kept up to date from FIO, use
+        `/lenders/{username}/loans/{contractId}/notes`.
       security:
         - lenderKey: []
       parameters:
@@ -321,6 +322,92 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /lenders/{username}/loans/{contractId}/notes:
+    put:
+      tags: [Reporting]
+      summary: Set or add to a loan's notes
+      description: |
+        Changes only the notes on one of the lender's own loans, **including loans kept up to date from FIO**,
+        whose other fields a lender cannot report. The loan must already be in the bureau, under this lender, and not deleted.
+        The trust label does not change.
+
+        Send one of:
+        - `notes`: replace the notes (null or empty clears them). Add `expected` with the notes you last read to be
+          refused (409) instead of overwriting a change someone else made since. The 409 carries the loan as it is now.
+        - `append`: add a line at the end, keeping whatever is there.
+
+        Every change is recorded in the loan's history under the lender's name. Sending the notes it already has changes nothing.
+      security:
+        - lenderKey: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+        - name: contractId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [notes]
+                  properties:
+                    notes: { type: [string, 'null'], maxLength: 2000 }
+                    expected: { type: [string, 'null'], description: The notes as you last read them. }
+                - type: object
+                  additionalProperties: false
+                  required: [append]
+                  properties:
+                    append: { type: string, minLength: 1, description: A line to add at the end. The result must stay within 2,000 characters. }
+            examples:
+              append:
+                value: { append: '2026-12-01: missed the 48-hour return on an overdraft conversion (ISDB)' }
+              replace:
+                value: { notes: 'Repaid in full after a late return', expected: 'Missed a return' }
+      responses:
+        '200':
+          description: The loan after the change; `changed` is `["notes"]`, or empty when nothing changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [loan, changed]
+                properties:
+                  loan: { $ref: '#/components/schemas/Loan' }
+                  changed:
+                    type: array
+                    items: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '401':
+          description: No key, or a key the bureau does not know.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: The key belongs to a different lender.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: The contract is not in the bureau.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Recorded under another lender, deleted, or (with `expected`) the notes changed since they were read.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Error'
+                  - type: object
+                    properties:
+                      loan: { $ref: '#/components/schemas/Loan' }
         '429': { $ref: '#/components/responses/Error' }
 
   /lender-keys:

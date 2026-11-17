@@ -380,6 +380,42 @@ api.put('/lenders/:username/loans/:contractId', async (c) => {
   return json({ loan: await q.getLoan(c.env.DB, result.loanId), created: result.created, changed: result.changed }, result.created ? 201 : 200);
 });
 
+/** Set or add to the notes on one of the lender's own loans, including loans kept up to date from FIO. */
+api.put('/lenders/:username/loans/:contractId/notes', async (c) => {
+  const lender = await lenderFromKey(c);
+  if (lender.username.toLowerCase() !== c.req.param('username').toLowerCase()) {
+    throw new ApiError(403, 'forbidden', `This key belongs to ${lender.username}. A lender can only add notes to their own loans.`);
+  }
+  const body = await jsonBody(c);
+  const text = (name: string, nullable: boolean): string | null => {
+    const v = body[name];
+    if (v === null && nullable) return null;
+    if (typeof v !== 'string') throw new ApiError(400, 'bad_request', `"${name}" must be text${nullable ? ' or null' : ''}.`);
+    return v;
+  };
+  const hasAppend = 'append' in body;
+  if (hasAppend === 'notes' in body) throw new ApiError(400, 'bad_request', 'Send either "notes" (to replace them) or "append" (to add a line), not both.');
+  if (hasAppend && 'expected' in body) throw new ApiError(400, 'bad_request', '"expected" goes with "notes"; "append" keeps what is there already.');
+  const change: edits.NotesChange = hasAppend
+    ? { append: text('append', false)! }
+    : 'expected' in body
+      ? { notes: text('notes', true), expected: text('expected', true) }
+      : { notes: text('notes', true) };
+
+  const contractId = c.req.param('contractId');
+  try {
+    const result = await edits.setLoanNotes(c.env.DB, lender, contractId, change);
+    return json({ loan: await q.getLoan(c.env.DB, result.loanId), changed: result.changed });
+  } catch (err) {
+    // When the notes changed under an "expected" check, send them as they are now so the caller can merge.
+    if (err instanceof edits.EditError && err.kind === 'conflict' && /while you were editing/.test(err.message)) {
+      const [loan] = (await q.listLoans(c.env.DB, { contractId: normalizeContractId(contractId) ?? '', limit: 1, offset: 0 })).loans;
+      return json({ error: { code: 'conflict', message: err.message }, loan: loan ?? null }, 409);
+    }
+    throw err;
+  }
+});
+
 /** Create (or replace) the reporting API key of a lender the signed-in user connected. The key is shown this once. */
 api.post('/lender-keys', async (c) => {
   const user = await editor(c);

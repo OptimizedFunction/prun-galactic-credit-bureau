@@ -35,7 +35,7 @@ Sheet with a website and an open JSON API.
 - **Safe with several editors.** Each save states the value the editor was looking at and is refused if
   someone changed it first. The ledger picks up other people's changes in the background.
 - **Reporting API for lenders.** A connected lender can create a key and record loans the game cannot see
-  from their own tools.
+  from their own tools, and add notes to any of their loans, including ones tracked from FIO.
 - **Sheet migration.** A script pulls later changes from the Google Sheet into the live database and
   reconciles them with edits made on the site.
 
@@ -160,6 +160,16 @@ curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract or own refe
 
 Reports are idempotent by contract ID, labelled Lender-reported, and listed in Recent changes like any edit.
 Only the key's hash is stored.
+
+The same key can add notes to any of the lender's own loans, including ones kept up to date from FIO, whose other
+fields it cannot report. Send `append` to add a line, or `notes` to replace them (with `expected` to be refused
+rather than overwrite someone else's change):
+
+```sh
+curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract>/notes \
+  -H "Authorization: Bearer pgcb_..." -H "Content-Type: application/json" \
+  -d '{"append":"Missed the 48-hour return on an overdraft conversion"}'
+```
 
 ## Recovering from abuse
 

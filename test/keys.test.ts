@@ -170,3 +170,39 @@ test('a lender cannot report over another lender, a FIO-tracked loan or a delete
   // A first report must be complete.
   await assert.rejects(() => reportLoan(db, lender, 'NEW0001', parseLoanFields({ borrower: 'Ivy' })), (err: unknown) => err instanceof EditError && err.kind === 'invalid');
 });
+
+test('a lender key can set and add to the notes on its own loans, FIO-tracked ones included', async () => {
+  const { setLoanNotes } = await import('../src/db/edits');
+  const q = await import('../src/db/queries');
+  const lender = (await db.prepare("SELECT id, username FROM lenders WHERE username = 'HandEntered'").first<{ id: number; username: string }>())!;
+  const notesOf = async (id: number) => (await q.getLoan(db, id))!;
+
+  // TRACKD1 is kept up to date from FIO: a report is refused, but notes go through and the trust label stays.
+  const tracked = await setLoanNotes(db, lender, 'trackd1', { notes: 'Missed the overdraft conversion return' });
+  assert.deepEqual(tracked.changed, ['notes']);
+  const loan = await notesOf(tracked.loanId);
+  assert.deepEqual({ notes: loan.notes, autoTrack: loan.autoTrack, trust: loan.trust }, { notes: 'Missed the overdraft conversion return', autoTrack: true, trust: loan.trust });
+  const [revision] = await q.getRevisions(db, 'loan', tracked.loanId);
+  assert.deepEqual({ actorType: revision!.actorType, actor: revision!.actor }, { actorType: 'lender', actor: 'HandEntered' });
+
+  // Append keeps what is there; the same notes again change nothing.
+  await setLoanNotes(db, lender, 'TRACKD1', { append: 'Repaid 2026-12-01' });
+  assert.equal((await notesOf(tracked.loanId)).notes, 'Missed the overdraft conversion return\nRepaid 2026-12-01');
+  assert.deepEqual((await setLoanNotes(db, lender, 'TRACKD1', { notes: 'Missed the overdraft conversion return\nRepaid 2026-12-01' })).changed, []);
+
+  // "expected" refuses to overwrite notes that changed since they were read.
+  await assert.rejects(
+    () => setLoanNotes(db, lender, 'TRACKD1', { notes: 'Replaced', expected: 'Something older' }),
+    (err: unknown) => err instanceof EditError && err.kind === 'conflict' && /while you were editing/.test(err.message),
+  );
+  await setLoanNotes(db, lender, 'TRACKD1', { notes: null, expected: 'Missed the overdraft conversion return\nRepaid 2026-12-01' });
+  assert.equal((await notesOf(tracked.loanId)).notes, null);
+
+  // Only the lender's own, existing, undeleted loans.
+  const refused = (contract: string, kind: string, pattern: RegExp) =>
+    assert.rejects(() => setLoanNotes(db, lender, contract, { append: 'x' }), (err: unknown) => err instanceof EditError && err.kind === kind && pattern.test(err.message));
+  await refused('OTHERS1', 'conflict', /another lender \(Granted\)/);
+  await refused('GONE001', 'conflict', /was deleted/);
+  await refused('NOPE001', 'not_found', /not in the bureau/);
+  await assert.rejects(() => setLoanNotes(db, lender, 'TRACKD1', { append: '   ' }), (err: unknown) => err instanceof EditError && err.kind === 'invalid');
+});
