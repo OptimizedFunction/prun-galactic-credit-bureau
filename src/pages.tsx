@@ -158,6 +158,9 @@ a.button { display: inline-block; padding: 9px 16px; color: #fff; background: #1
 a.button:hover { text-decoration: none; background: #114a94; }
 section.mine + section.mine { margin-top: 40px; padding-top: 8px; border-top: 1px solid var(--line); }
 p.hint.spaced { margin: 12px 0 8px; }
+td.share { position: relative; width: 60%; padding-bottom: 12px; }
+td.share .bar { position: absolute; left: 12px; bottom: 5px; height: 3px; max-width: calc(100% - 24px); background: #f2b84b; border-radius: 2px; }
+input.rowfilter { width: 100%; max-width: 360px; margin: 0 0 12px; padding: 8px 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .titlebar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
 button.ghost { min-height: 34px; padding: 6px 14px; color: var(--link); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }
 button.ghost:hover { background: var(--chip); }
@@ -348,6 +351,18 @@ const PAGE_SCRIPT = `(function () {
     if (isNaN(s) || s < 0) return;
     t.title = t.textContent;
     t.textContent = s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' minutes ago' : s < 172800 ? Math.round(s / 3600) + ' hours ago' : Math.round(s / 86400) + ' days ago';
+  });
+})();`;
+
+/** Filters the Lenders table by name as you type. */
+const LENDER_FILTER_SCRIPT = `(function () {
+  var box = document.getElementById('lender-filter'), table = document.getElementById('lender-table');
+  if (!box || !table) return;
+  box.addEventListener('input', function () {
+    var want = box.value.trim().toLowerCase();
+    Array.prototype.forEach.call(table.tBodies[0].rows, function (tr) {
+      tr.hidden = want !== '' && tr.cells[0].textContent.toLowerCase().indexOf(want) < 0;
+    });
   });
 })();`;
 
@@ -951,8 +966,9 @@ pages.get('/lenders', async (c) => {
           .{failing.length > 0 && <> Loans from {failing.map((l) => l.username).join(', ')} may be out of date until their sync works again.</>}
         </p>
       )}
+      <input type="search" class="rowfilter" id="lender-filter" placeholder="Find a lender" aria-label="Find a lender" autocomplete="off" />
       <div class="scroll">
-        <table class="stack">
+        <table class="stack" id="lender-table">
           <thead>
             <tr>
               <th>{head('name', 'Lender')}</th>
@@ -1012,6 +1028,7 @@ pages.get('/lenders', async (c) => {
           </tbody>
         </table>
       </div>
+      <script dangerouslySetInnerHTML={{ __html: LENDER_FILTER_SCRIPT }} />
     </Layout>,
   );
 });
@@ -1292,8 +1309,10 @@ pages.get('/leaderboards', async (c) => {
           {entries.map((e) => (
             <tr>
               <td class="num">{e.rank}</td>
-              <td>
+              <td class="share">
                 <a href={lenderUrl(e.lender)}>{e.lender}</a>
+                {/* Length shows this lender's amount against the largest on the board. */}
+                <span class="bar" style={`width:${Math.max(1, Math.round((e.amountMinor / (entries[0]?.amountMinor || 1)) * 100))}%`}></span>
               </td>
               <td class="num">{formatMinor(e.amountMinor)}</td>
             </tr>
