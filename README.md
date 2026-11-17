@@ -212,10 +212,16 @@ GET /api/v1/changes
 The site is a Cloudflare Worker with a D1 database, served on `bureau.prunbanking.com` (see `wrangler.jsonc`).
 
 ```sh
-npx wrangler login                                # once per machine
-npx wrangler d1 migrations apply bureau --remote  # when migrations/ has something new
-npx wrangler deploy
+npx wrangler login     # once per machine
+npm version minor      # optional: bump the version (patch for fixes, minor for features); commits and tags it
+npm run deploy         # type-check, test, apply new migrations, deploy
 ```
+
+`npm run deploy` stamps the build with the version from `package.json`, the git commit and the time. The
+footer of every page and the Version section of the About page show it, and API answers carry it in the
+`X-Bureau-Version` header. It refuses to deploy uncommitted changes unless given `-- --allow-dirty`, in
+which case the version says `+changes`. A bare `npx wrangler deploy` still works, but shows "Development
+build". `npx wrangler rollback` puts the previous version back (code only, not the database).
 
 Production secrets are set with `npx wrangler secret put NAME`:
 

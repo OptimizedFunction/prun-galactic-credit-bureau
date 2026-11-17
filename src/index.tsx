@@ -7,10 +7,18 @@ import { mePages } from './me';
 import { trackPages } from './track';
 import { notFoundPage, pages } from './pages';
 import { pruneBuckets } from './lib/rateLimit';
+import { releaseTag } from './release';
 import { runSync } from './sync/run';
 import type { Env } from './env';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Which release answered, on every response (the API reference mentions it).
+const RELEASE_TAG = releaseTag();
+app.use(async (c, next) => {
+  await next();
+  c.header('X-Bureau-Version', RELEASE_TAG);
+});
 
 app.route('/api/v1', api);
 app.route('/auth', auth);

@@ -1,5 +1,6 @@
 // Server-rendered public pages. No client-side framework; plain HTML and one stylesheet.
 import { Hono } from 'hono';
+import { commitUrl, RELEASE, REPO_URL } from './release';
 import { html } from 'hono/html';
 import type { Child } from 'hono/jsx';
 import logoSvg from '../assets/logo.svg';
@@ -76,6 +77,7 @@ header.site .menu a:hover, header.site .menu button:hover { background: var(--ch
 main { padding-top: 24px; padding-bottom: 40px; }
 main.wide { max-width: none; }
 footer { color: var(--muted); font-size: 13px; padding-bottom: 32px; }
+footer a.version { color: inherit; white-space: nowrap; }
 h1 { font-size: 26px; margin: 0 0 4px; overflow-wrap: anywhere; }
 h2 { font-size: 18px; margin: 32px 0 10px; }
 p.sub { color: var(--muted); margin: 0 0 16px; }
@@ -425,7 +427,10 @@ export const Layout = (props: { title: string; description?: string; wide?: bool
         {props.children}
       </main>
       <footer>
-        A public record of lending in Prosperous Universe. Amounts are in-game currency.
+        A public record of lending in Prosperous Universe. Amounts are in-game currency.{' '}
+        <a class="version" href="/about#version">
+          {RELEASE.version ? `Version ${RELEASE.version}` : 'Development build'}
+        </a>
       </footer>
       <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
       <script dangerouslySetInnerHTML={{ __html: PAGE_SCRIPT }} />
@@ -1457,6 +1462,7 @@ pages.get('/about', (c) =>
         <a href="#editing">Editing</a>
         <a href="#disputes">If a record about you is wrong</a>
         <a href="#api">API</a>
+        <a href="#version">Version</a>
       </nav>
 
       <section class="panel about" id="what">
@@ -1560,6 +1566,29 @@ The <a href="/lenders">Lenders</a> page shows when each tracked lender was last 
         <p>
           Everything on this site is also served as JSON, no key required. The <a href="/api">API page</a> lists every endpoint with examples and lets
           you try each one.
+        </p>
+      </section>
+
+      <section class="panel about" id="version">
+        <h2>Version</h2>
+        {RELEASE.version ? (
+          <dl class="facts">
+            <dt>Version</dt>
+            <dd>{RELEASE.version}</dd>
+            <dt>Code</dt>
+            <dd>{commitUrl() ? <a href={commitUrl()!}>{RELEASE.commit}</a> : RELEASE.commit}</dd>
+            {RELEASE.releasedAt && (
+              <>
+                <dt>Released</dt>
+                <dd>{stamp(RELEASE.releasedAt)}</dd>
+              </>
+            )}
+          </dl>
+        ) : (
+          <p>A development build, not a released version.</p>
+        )}
+        <p class="muted">
+          The source is on <a href={REPO_URL}>GitHub</a>. The API sends the same version with every answer, in the <code>X-Bureau-Version</code> header.
         </p>
       </section>
     </Layout>,
