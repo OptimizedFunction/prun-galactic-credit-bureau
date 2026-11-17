@@ -1,8 +1,13 @@
 import { getPlatformProxy } from 'wrangler';
 
-/** Opens the same local D1 database that `wrangler dev` uses. Call dispose() when done. */
+/**
+ * Opens the same local D1 database that `wrangler dev` uses. Call dispose() when done.
+ * Set D1_PERSIST to a folder to use a separate local database there instead (the same folder as
+ * wrangler's --persist-to), for example to build a clean seed without touching the dev data.
+ */
 export async function openLocalDb(): Promise<{ db: D1Database; dispose: () => Promise<void> }> {
-  const proxy = await getPlatformProxy<{ DB: D1Database }>();
+  const dir = process.env.D1_PERSIST;
+  const proxy = await getPlatformProxy<{ DB: D1Database }>(dir ? { persist: { path: `${dir}/v3` } } : {});
   return { db: proxy.env.DB, dispose: proxy.dispose };
 }
 
