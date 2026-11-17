@@ -458,13 +458,14 @@ export interface SyncHealth {
   ok: boolean;
 }
 
-/** Latest sync result for each FIO-tracked lender. */
+/** Latest sync result for each lender tracked through FIO now. Results left behind by lenders who are no longer connected are not counted. */
 export async function getSyncHealth(db: D1Database): Promise<SyncHealth[]> {
   const { results } = await db
     .prepare(
       `SELECT le.username AS lender, s.checked_at, s.http_status, s.contracts_returned, s.loans_kept, s.error
        FROM sync_runs s JOIN lenders le ON le.id = s.lender_id
        WHERE s.id = (SELECT s2.id FROM sync_runs s2 WHERE s2.lender_id = s.lender_id ORDER BY s2.checked_at DESC, s2.id DESC LIMIT 1)
+         AND le.tracking_mode = 'fio' AND le.fio_key_enc IS NOT NULL
        ORDER BY le.username`,
     )
     .all<{ lender: string; checked_at: string; http_status: number | null; contracts_returned: number | null; loans_kept: number | null; error: string | null }>();
