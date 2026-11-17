@@ -92,3 +92,83 @@ test('only the person who connected a lender can disconnect it; the key is then 
   assert.deepEqual(row, { tracking_mode: 'manual', fio_key_enc: null, fio_key_added_by_id: null });
   assert.deepEqual((await listConnectedBy(db, ANN.id)).map((l) => l.username), ['HandEntered']);
 });
+
+// ---- Reporting with a lender API key ----
+
+test('a lender API key is issued only to whoever connected the lender, and only its hash is stored', async () => {
+  const { createApiKey, lenderForApiKey, revokeApiKey } = await import('../src/db/lenderKeys');
+  await assert.rejects(() => createApiKey(db, 'Granted', ANN), (err: unknown) => err instanceof EditError && /Connect this lender through FIO/.test(err.message));
+  await assert.rejects(() => createApiKey(db, 'HandEntered', BEN), (err: unknown) => err instanceof EditError && /Only the person who connected/.test(err.message));
+
+  const made = await createApiKey(db, 'handentered', ANN);
+  assert.match(made.apiKey, /^pgcb_[A-Za-z0-9_-]{40,}$/);
+  assert.equal(made.username, 'HandEntered');
+  const stored = await db.prepare("SELECT api_key_hash, api_key_prefix FROM lenders WHERE username = 'HandEntered'").first<Record<string, string>>();
+  assert.ok(!JSON.stringify(stored).includes(made.apiKey), 'the key itself is not stored');
+  assert.equal(stored!['api_key_prefix'], made.apiKey.slice(0, 11));
+
+  assert.equal((await lenderForApiKey(db, made.apiKey))!.username, 'HandEntered');
+  assert.equal(await lenderForApiKey(db, made.apiKey + 'x'), null);
+  assert.equal(await lenderForApiKey(db, 'not-a-key'), null);
+
+  // Replacing the key retires the old one; revoking leaves none.
+  const second = await createApiKey(db, 'HandEntered', ANN);
+  assert.equal(await lenderForApiKey(db, made.apiKey), null);
+  assert.equal((await lenderForApiKey(db, second.apiKey))!.username, 'HandEntered');
+  await revokeApiKey(db, 'HandEntered', ANN);
+  assert.equal(await lenderForApiKey(db, second.apiKey), null);
+});
+
+test('reporting a loan is idempotent by contract ID and labelled lender-reported', async () => {
+  const { parseLoanFields, reportLoan } = await import('../src/db/edits');
+  const q = await import('../src/db/queries');
+  const lender = (await db.prepare("SELECT id, username FROM lenders WHERE username = 'HandEntered'").first<{ id: number; username: string }>())!;
+  const report = { borrower: 'Ivy', principal: '3,000,000', currency: 'CIS', issuedOn: '2026-07-01', durationWeeks: 8, status: 'In Progress' };
+
+  const first = await reportLoan(db, lender, 'ADV0001', parseLoanFields(report));
+  assert.equal(first.created, true);
+  const loan = (await q.getLoan(db, first.loanId))!;
+  assert.deepEqual(
+    { lender: loan.lender, contract: loan.contractId, trust: loan.trust, source: loan.source, autoTrack: loan.autoTrack, status: loan.status },
+    { lender: 'HandEntered', contract: 'ADV0001', trust: 'lender_reported', source: 'api', autoTrack: false, status: 'in_progress' },
+  );
+
+  // The same report again changes nothing and records nothing.
+  const again = await reportLoan(db, lender, 'ADV0001', parseLoanFields(report));
+  assert.deepEqual({ created: again.created, changed: again.changed, id: again.loanId }, { created: false, changed: [], id: first.loanId });
+  assert.equal((await q.getRevisions(db, 'loan', first.loanId)).length, 1);
+
+  // A later report updates it, under the lender's name.
+  const later = await reportLoan(db, lender, 'adv0001', parseLoanFields({ ...report, status: 'Complete' }));
+  assert.deepEqual(later.changed, ['status']);
+  const [revision] = await q.getRevisions(db, 'loan', first.loanId);
+  assert.deepEqual({ actorType: revision!.actorType, actor: revision!.actor, actorId: revision!.actorId }, { actorType: 'lender', actor: 'HandEntered', actorId: `lender:${lender.id}` });
+  assert.deepEqual((await q.getLoanHistory(db, first.loanId)).map((h) => [h.newStatus, h.source]), [['in_progress', 'api'], ['complete', 'api']]);
+
+  // The body cannot move the loan to another lender or switch tracking on.
+  await reportLoan(db, lender, 'ADV0001', parseLoanFields({ ...report, status: 'Complete', lender: 'Someone', autoTrack: true }));
+  const still = (await q.getLoan(db, first.loanId))!;
+  assert.deepEqual({ lender: still.lender, autoTrack: still.autoTrack }, { lender: 'HandEntered', autoTrack: false });
+});
+
+test('a lender cannot report over another lender, a FIO-tracked loan or a deleted one', async () => {
+  const { createLoan, deleteLoan, parseLoanFields, reportLoan } = await import('../src/db/edits');
+  const lender = (await db.prepare("SELECT id, username FROM lenders WHERE username = 'HandEntered'").first<{ id: number; username: string }>())!;
+  const report = parseLoanFields({ borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'Complete' });
+  const refused = (contract: string, pattern: RegExp) =>
+    assert.rejects(() => reportLoan(db, lender, contract, report), (err: unknown) => err instanceof EditError && err.kind === 'conflict' && pattern.test(err.message));
+
+  await createLoan(db, parseLoanFields({ lender: 'Granted', borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'OTHERS1' }), ANN);
+  await refused('OTHERS1', /another lender \(Granted\)/);
+
+  const trackedId = await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '5', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'TRACKD1', autoTrack: true }), ANN);
+  await refused('TRACKD1', /kept up to date from FIO/);
+  assert.ok(trackedId > 0);
+
+  const goneId = await createLoan(db, parseLoanFields({ lender: 'HandEntered', borrower: 'Ivy', principal: '1', currency: 'AIC', issuedOn: '2026-07-01', status: 'In Progress', contractId: 'GONE001' }), ANN);
+  await deleteLoan(db, goneId, ANN);
+  await refused('GONE001', /was deleted/);
+
+  // A first report must be complete.
+  await assert.rejects(() => reportLoan(db, lender, 'NEW0001', parseLoanFields({ borrower: 'Ivy' })), (err: unknown) => err instanceof EditError && err.kind === 'invalid');
+});
