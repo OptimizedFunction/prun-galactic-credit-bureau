@@ -61,7 +61,7 @@ Set `FIO_KEY_SECRET` to any long random string in `.dev.vars`. Do not change it 
 become unreadable and lenders have to connect again.
 
 To run the sync locally, start `npm run dev:cron` and open `http://localhost:8787/__scheduled`. Results show
-on the Sync health page.
+in the Updates column of the Lenders page.
 
 `npm run sync:dry` fetches from live FIO and prints what the sync would change, without writing anything.
 

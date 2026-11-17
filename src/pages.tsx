@@ -377,7 +377,6 @@ export const Layout = (props: { title: string; description?: string; wide?: bool
             <a href="/ledger">Ledger</a>
             <a href="/lenders">Lenders</a>
             <a href="/leaderboards">Leaderboards</a>
-            <a href="/sync">Sync health</a>
             <a href="/changes">Changes</a>
             <a href="/about">About</a>
           </nav>
@@ -568,7 +567,10 @@ const Freshness = ({ health }: { health: q.SyncHealth[] }) => {
       <time datetime={last} data-rel>
         {stamp(last)}
       </time>
-      ; {current} of {plural(health.length, 'tracked lender')} current. <a href="/sync">Sync health</a>
+      ; <a href="/lenders">
+        {current} of {plural(health.length, 'tracked lender')} current
+      </a>
+      .
     </p>
   );
 };
@@ -886,7 +888,12 @@ pages.get('/borrowers/:username', async (c) => {
 
 pages.get('/lenders', async (c) => {
   const sort = c.req.query('sort') === 'loans' ? 'loans' : c.req.query('sort') === 'name' ? 'name' : 'out';
-  const lenders = (await q.listLenders(c.env.DB)).map((l) => ({ ...l, all: q.combine(l.exposure) }));
+  const [list, health] = await Promise.all([q.listLenders(c.env.DB), q.getSyncHealth(c.env.DB)]);
+  const syncOf = new Map(health.map((h) => [h.lender.toLowerCase(), h]));
+  const lenders = list.map((l) => ({ ...l, all: q.combine(l.exposure), sync: syncOf.get(l.username.toLowerCase()) }));
+  const tracked = lenders.filter((l) => l.trackingMode === 'fio');
+  const failing = tracked.filter((l) => l.sync && !l.sync.ok);
+  const lastCheck = health.reduce((latest, h) => (h.checkedAt > latest ? h.checkedAt : latest), '');
   lenders.sort((a, b) =>
     sort === 'name'
       ? a.username.localeCompare(b.username)
@@ -910,12 +917,28 @@ pages.get('/lenders', async (c) => {
       <p class="sub">
         Everyone who has lent, and what each has out on loan today. Lend yourself? <a href="/track">Track your loans automatically</a>.
       </p>
+      {tracked.length > 0 && (
+        <p class={failing.length > 0 ? 'panel alert' : 'fresh'}>
+          <strong>
+            {tracked.length - failing.length} of {plural(tracked.length, 'tracked lender')} {tracked.length - failing.length === 1 ? 'is' : 'are'} up to date
+          </strong>
+          {lastCheck && (
+            <>
+              , last checked against FIO{' '}
+              <time datetime={lastCheck} data-rel>
+                {stamp(lastCheck)}
+              </time>
+            </>
+          )}
+          .{failing.length > 0 && <> Loans from {failing.map((l) => l.username).join(', ')} may be out of date until their sync works again.</>}
+        </p>
+      )}
       <div class="scroll">
         <table class="stack">
           <thead>
             <tr>
               <th>{head('name', 'Lender')}</th>
-              <th>Tracking</th>
+              <th>Updates</th>
               <th class="num">{head('loans', 'Loans')}</th>
               <th class="num">{head('out', 'Out now')}</th>
               <th class="num">AIC</th>
@@ -930,8 +953,23 @@ pages.get('/lenders', async (c) => {
                 <td data-label="Lender">
                   <a href={lenderUrl(l.username)}>{l.username}</a>
                 </td>
-                <td class="muted" data-label="Tracking">
-                  {l.trackingMode === 'fio' ? 'Automatic (FIO)' : l.trackingMode === 'api' ? 'Reported (API)' : 'Manual'}
+                <td data-label="Updates">
+                  {l.trackingMode !== 'fio' ? (
+                    <span class="muted">{l.trackingMode === 'api' ? 'Reported by the lender' : 'Entered by hand'}</span>
+                  ) : !l.sync ? (
+                    <span class="muted">Automatic, first sync pending</span>
+                  ) : l.sync.ok ? (
+                    <span class="trust fio_verified">
+                      Synced{' '}
+                      <time datetime={l.sync.checkedAt} data-rel>
+                        {stamp(l.sync.checkedAt)}
+                      </time>
+                    </span>
+                  ) : (
+                    <span class="badge bad" title={`Last tried ${stamp(l.sync.checkedAt)}`}>
+                      Sync failing: {l.sync.error ?? 'unknown error'}
+                    </span>
+                  )}
                 </td>
                 <td class="num" data-label="Loans">
                   {l.loans}
@@ -1017,7 +1055,7 @@ pages.get('/lenders/:username', async (c) => {
           <time datetime={sync.checkedAt} data-rel>
             {stamp(sync.checkedAt)}
           </time>
-          . <a href="/sync">Sync health</a>
+          .
         </p>
       ) : (
         <p class="fresh">These loans were entered by hand and are not checked against FIO.</p>
@@ -1274,50 +1312,6 @@ pages.get('/leaderboards', async (c) => {
   );
 });
 
-pages.get('/sync', async (c) => {
-  const health = await q.getSyncHealth(c.env.DB);
-  return c.html(
-    <Layout title="Sync health">
-      <h1>Sync health</h1>
-      <p class="sub">
-        When each automatically tracked lender was last read from FIO, and how it went. <a href="/track">Add yourself</a>.
-      </p>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Lender</th>
-              <th>Result</th>
-              <th class="num">Contracts returned</th>
-              <th class="num">Loans kept</th>
-              <th>Checked</th>
-            </tr>
-          </thead>
-          <tbody>
-            {health.map((h) => (
-              <tr>
-                <td>
-                  <a href={lenderUrl(h.lender)}>{h.lender}</a>
-                </td>
-                <td>
-                  {h.ok ? (
-                    <span class="badge good">OK</span>
-                  ) : (
-                    <span class="badge bad">{h.error ?? (h.httpStatus === 401 ? 'No FIO permission' : 'Failed')}</span>
-                  )}
-                </td>
-                <td class="num">{h.contractsReturned ?? '–'}</td>
-                <td class="num">{h.loansKept ?? '–'}</td>
-                <td>{stamp(h.checkedAt)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Layout>,
-  );
-});
-
 pages.get('/about', (c) =>
   c.html(
     <Layout title="About" description="How the PrUn Galactic Credit Bureau works: what the statuses and trust labels mean, how loans are tracked and how to correct a record.">
@@ -1397,7 +1391,7 @@ pages.get('/about', (c) =>
           current without anyone typing it in. Only loans the lender paid out are recorded; loans they received are reported by their own lenders.
         </p>
         <p>
-          <a href="/sync">Sync health</a> shows when each tracked lender was last read.
+The <a href="/lenders">Lenders</a> page shows when each tracked lender was last read, and flags any whose sync is failing.
         </p>
       </section>
 

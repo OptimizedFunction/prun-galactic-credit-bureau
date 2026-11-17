@@ -51,7 +51,7 @@ export async function trackedLenders(db: D1Database, keys: SyncKeys): Promise<Tr
   );
 }
 
-/** Fetches one lender's contracts with the right key, with errors worded for the Sync health page. */
+/** Fetches one lender's contracts with the right key, with errors worded for the Lenders page. */
 export async function fetchTracked(lender: TrackedLender, fetchLoans: NonNullable<SyncDeps['fetchLoans']>): Promise<LoanFetchResult> {
   if (lender.key === null) return { lender: lender.username, httpStatus: null, contracts: null, error: lender.problem };
   const result = await fetchLoans(lender.key, lender.username);
