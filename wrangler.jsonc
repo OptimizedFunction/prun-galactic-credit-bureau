@@ -4,6 +4,10 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-04-01",
   "observability": { "enabled": true },
+  // The site lives on its own subdomain only, so sign-in has a single address to return to.
+  "routes": [{ "pattern": "bureau.prunbanking.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
   // Lets the Worker import the logo, the browser-side ledger script and the API description as strings.
   "rules": [{ "type": "Text", "globs": ["**/*.svg", "**/*.client.js", "**/*.yaml"], "fallthrough": true }],
   // FIO sync, hourly. To test locally: "npm run dev:cron", then open /__scheduled.
@@ -12,8 +16,7 @@
     {
       "binding": "DB",
       "database_name": "bureau",
-      // Placeholder: local dev ignores it. Replace with the real ID from `wrangler d1 create bureau` before deploying.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "96bcc6bc-d51f-4816-a16d-f4651cf7df0f",
       "migrations_dir": "migrations"
     }
   ]
