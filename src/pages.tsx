@@ -1147,6 +1147,91 @@ function loanTimeline(history: q.StatusChange[], revisions: q.Revision[]): Timel
   return events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
+const NOTES_CSS = `
+#notes .notes-text { white-space: pre-wrap; margin-right: 8px; }
+button.ghost.small { min-height: 0; padding: 2px 10px; font-size: 13px; }
+#notes textarea { display: block; width: 100%; min-height: 84px; padding: 8px 10px; font: inherit; color: var(--text); background: var(--bg, transparent); border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
+#notes .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+#notes .row button.save { min-height: 34px; padding: 6px 16px; font: inherit; font-size: 14px; font-weight: 600; color: #fff; background: #1558b0; border: 0; border-radius: 6px; cursor: pointer; }
+#notes .row button:disabled { opacity: .6; cursor: default; }
+#notes .msg { color: var(--bad); font-size: 13px; }
+`;
+
+/** Edits a loan's notes in place on its page. Saving goes through the same checked edit as the ledger. */
+const NOTES_SCRIPT = `(function () {
+  var box = document.getElementById('notes');
+  var edit = document.getElementById('notes-edit');
+  if (!box || !edit) return;
+  var text = box.querySelector('.notes-text');
+  var saved = box.dataset.notes;
+  var here = location.pathname + location.search;
+
+  function open(draft) {
+    text.hidden = true; edit.hidden = true;
+    var area = document.createElement('textarea');
+    area.value = draft === undefined ? saved : draft;
+    area.setAttribute('aria-label', 'Notes');
+    var row = document.createElement('div'); row.className = 'row';
+    var save = document.createElement('button'); save.type = 'button'; save.className = 'save'; save.textContent = 'Save';
+    var cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'ghost'; cancel.textContent = 'Cancel';
+    var msg = document.createElement('span'); msg.className = 'msg'; msg.setAttribute('role', 'alert');
+    row.append(save, cancel, msg);
+    box.append(area, row);
+    area.focus();
+
+    function close() { area.remove(); row.remove(); text.hidden = false; edit.hidden = false; edit.focus(); }
+    cancel.onclick = close;
+    area.onkeydown = function (e) {
+      if (e.key === 'Escape') close();
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save.click();
+    };
+    save.onclick = function () {
+      if (area.value.trim() === saved.trim()) return close();
+      save.disabled = true; msg.textContent = '';
+      fetch('/api/v1/loans/' + box.dataset.loan, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: area.value, expected: { notes: saved } }),
+      }).then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); }).then(function (res) {
+        if (res.status === 200) { try { sessionStorage.removeItem('noteDraft'); } catch (e) {} location.reload(); return; }
+        save.disabled = false;
+        if (res.status === 401) { signIn(area.value); return; }
+        if (res.status === 409 && res.body.loan) {
+          saved = res.body.loan.notes || '';
+          msg.textContent = 'Someone else changed these notes while you were writing. They now read: "' + (saved || 'nothing') + '". Press Save again to replace them with yours.';
+          return;
+        }
+        msg.textContent = (res.body.error && res.body.error.message) || 'Could not save. Try again.';
+      }).catch(function () { save.disabled = false; msg.textContent = 'Could not reach the site. Try again.'; });
+    };
+  }
+
+  // Signing in leaves the page, so what was typed is kept and put back afterwards.
+  function signIn(draft) {
+    try { if (draft !== undefined) sessionStorage.setItem('noteDraft', JSON.stringify({ at: here, text: draft })); } catch (e) {}
+    location.href = '/auth/login?return=' + encodeURIComponent(here);
+  }
+
+  edit.onclick = function () {
+    edit.disabled = true;
+    fetch('/auth/me').then(function (r) { return r.json(); }).then(function (d) {
+      edit.disabled = false;
+      if (d.user) return open();
+      if (!d.signInAvailable) { edit.replaceWith(document.createTextNode(' Sign-in is not set up on this server.')); return; }
+      try { sessionStorage.setItem('noteDraft', JSON.stringify({ at: here, text: saved })); } catch (e) {}
+      signIn();
+    }).catch(function () { edit.disabled = false; });
+  };
+
+  try {
+    var kept = JSON.parse(sessionStorage.getItem('noteDraft') || 'null');
+    if (kept && kept.at === here) {
+      sessionStorage.removeItem('noteDraft');
+      fetch('/auth/me').then(function (r) { return r.json(); }).then(function (d) { if (d.user) open(kept.text); });
+    }
+  } catch (e) {}
+})();`;
+
 pages.get('/loans/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const loan = Number.isInteger(id) && id > 0 ? await q.getLoan(c.env.DB, id) : null;
@@ -1208,13 +1293,18 @@ pages.get('/loans/:id', async (c) => {
             </dd>
             <dt>Contract ID</dt>
             <dd>{loan.contractId ?? 'None recorded'}</dd>
-            {loan.notes && (
-              <>
-                <dt>Notes</dt>
-                <dd>{loan.notes}</dd>
-              </>
-            )}
+            <dt>Notes</dt>
+            <dd id="notes" data-loan={String(loan.id)} data-notes={loan.notes ?? ''}>
+              <span class={loan.notes ? 'notes-text' : 'notes-text muted'}>{loan.notes ?? 'None'}</span>
+              {!loan.deletedAt && (
+                <button type="button" class="ghost small" id="notes-edit">
+                  {loan.notes ? 'Edit' : 'Add a note'}
+                </button>
+              )}
+            </dd>
           </dl>
+          <style dangerouslySetInnerHTML={{ __html: NOTES_CSS }} />
+          <script dangerouslySetInnerHTML={{ __html: NOTES_SCRIPT }} />
         </div>
 
         <div class="panel">
@@ -1232,7 +1322,7 @@ pages.get('/loans/:id', async (c) => {
             <p>
               This record mirrors the in-game contract, so its status, amount and dates follow the game and cannot be changed by hand. If the contract
               itself is the problem, take it up with <a href={lenderUrl(loan.lender)}>{loan.lender}</a>. Anyone signed in can still add context in the
-              notes, <a href={ledgerLink}>in the ledger</a>.
+              notes, here or <a href={ledgerLink}>in the ledger</a>.
             </p>
           ) : (
             <p>
