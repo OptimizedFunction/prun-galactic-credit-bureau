@@ -23,7 +23,8 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | Community editing (ledger page, Discord sign-in, change log with undo) | Done; sign-in itself not yet tried with a real Discord account |
 | Lenders connecting their own FIO key (Track my loans page) | Done |
 | My lending (a connected lender's own view, with key health) | Done |
-| Lender API keys and the report endpoint | Not started |
+| Lender API keys and the report endpoint | Done |
+| Token-bucket rate limiting on the API | Done |
 | Deployment | Not started (runs locally only) |
 
 ## Run it locally
@@ -81,6 +82,20 @@ also checks for other people's changes every 30 seconds while its tab is visible
 Sign-in needs a Discord application: put its client ID and secret in `.dev.vars`, and add
 `http://localhost:8787/auth/callback` and `http://127.0.0.1:8787/auth/callback` as redirect URLs in the
 Discord developer portal.
+
+## Reporting API
+
+A lender who has connected FIO can create a reporting API key on the Track my loans page and record loans from
+their own tools, for lending the game cannot see (advances, sponsored bases):
+
+```sh
+curl -X PUT https://<host>/api/v1/lenders/<username>/loans/<contract or own reference> \
+  -H "Authorization: Bearer pgcb_..." -H "Content-Type: application/json" \
+  -d '{"borrower":"SomePlayer","principal":"2,500,000","currency":"NCC","issuedOn":"2026-11-10","status":"In Progress"}'
+```
+
+Reports are idempotent by contract ID, labelled Lender-reported, and listed in Recent changes like any edit.
+Only the key's hash is stored.
 
 ## API
 

@@ -20,7 +20,9 @@ info:
     Any signed-in user may edit any loan. Every change is recorded with who made it; see `/changes`.
     Loans with `autoTrack` on follow FIO: only `notes` and `autoTrack` can be changed on them, and they cannot be deleted.
 
-    **Reporting** (marked *planned*) will need a per-lender API key and is not implemented yet.
+    **Reporting** lets a lender's own tools record loans, with that lender's API key sent as
+    `Authorization: Bearer <key>`. A lender creates the key on the Track my loans page after connecting FIO,
+    which is what proves the account is theirs. A key can only report loans under its own lender.
 
     Conventions:
     - Amounts are decimal strings (`"25000000.00"`) and always come with a currency. Amounts in
@@ -42,7 +44,7 @@ tags:
   - name: Tracking
     description: Lenders connecting their own FIO API key. Needs a Discord sign-in.
   - name: Reporting
-    description: Planned. Not implemented yet.
+    description: Needs a lender API key.
 
 paths:
   /search:
@@ -255,10 +257,20 @@ paths:
   /lenders/{username}/loans/{contractId}:
     put:
       tags: [Reporting]
-      summary: Report a loan (planned)
+      summary: Report a loan
       description: |
-        Creates or updates one of the lender's own loans. Idempotent by contract ID: sending the same
-        report twice changes nothing. The loan is labelled `lender_reported` until it has been checked against FIO.
+        Creates or updates one of the lender's own loans. Idempotent by contract ID: the first report
+        creates the loan, a later one updates the fields that differ, and an identical one changes nothing.
+        The loan is labelled `lender_reported`.
+
+        For lending with no in-game contract (an advance, a sponsored base), use a reference of your own as
+        the contract ID: 1 to 16 letters and digits, unique across the bureau.
+
+        A first report must carry borrower, principal, issuedOn and status. Later ones may send only what
+        changed. `lender`, `contractId` and `autoTrack` in the body are ignored.
+
+        Refused with 409 when the contract is recorded under another lender, is kept up to date from FIO,
+        or was deleted from the bureau.
       security:
         - lenderKey: []
       parameters:
@@ -266,29 +278,99 @@ paths:
         - name: contractId
           in: path
           required: true
-          schema: { type: string }
+          schema: { type: string, pattern: '^[A-Za-z0-9]{1,16}$' }
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/LoanReport' }
+            example:
+              borrower: SomePlayer
+              principal: '2,500,000'
+              currency: NCC
+              issuedOn: '2026-11-10'
+              durationWeeks: 6
+              status: In Progress
+              notes: Advance for materials
       responses:
         '200':
-          description: The loan as stored.
+          description: The loan was already on record; `changed` lists the fields this report altered.
           content:
             application/json:
-              schema:
-                type: object
-                required: [loan]
-                properties:
-                  loan: { $ref: '#/components/schemas/Loan' }
+              schema: { $ref: '#/components/schemas/ReportResult' }
+        '201':
+          description: The loan was created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResult' }
         '400': { $ref: '#/components/responses/Error' }
-        '401': { $ref: '#/components/responses/Error' }
+        '401':
+          description: No key, or a key the bureau does not know.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '403':
           description: The key belongs to a different lender.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Recorded under another lender, tracked from FIO, or deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /lender-keys:
+    post:
+      tags: [Tracking]
+      summary: Create or replace a lender's reporting API key
+      description: |
+        For a lender the signed-in user connected through FIO. The key is returned once and only its hash
+        is kept, so store it straight away. Creating a new key retires the old one.
+      security:
+        - session: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username]
+              properties:
+                username: { type: string, description: The lender to create the key for. }
+      responses:
+        '201':
+          description: The new key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [username, apiKey, prefix]
+                properties:
+                  username: { type: string }
+                  apiKey: { type: string, description: 'Send as "Authorization: Bearer <key>". Shown this once.' }
+                  prefix: { type: string, description: The first characters, shown later to identify the key. }
+        '401': { $ref: '#/components/responses/Error' }
+        '409':
+          description: The lender is not connected through FIO, or someone else connected it.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /lender-keys/{username}:
+    delete:
+      tags: [Tracking]
+      summary: Revoke a lender's reporting API key
+      security:
+        - session: []
+      parameters:
+        - $ref: '#/components/parameters/Username'
+      responses:
+        '200':
+          description: Revoked.
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 
   /loans:
     post:
@@ -680,7 +762,7 @@ components:
     lenderKey:
       type: http
       scheme: bearer
-      description: Per-lender API key, issued after Discord sign-in. Planned.
+      description: 'A lender API key, created on the Track my loans page. Sent as "Authorization: Bearer <key>".'
 
   parameters:
     LoanId:
@@ -854,23 +936,29 @@ components:
 
     LoanReport:
       type: object
-      required: [borrower, principal, currency, issuedOn, status]
+      description: The fields of a report. A first report needs borrower, principal, issuedOn and status.
+      additionalProperties: false
       properties:
-        borrower: { type: string, description: Borrower's username. }
-        principal: { $ref: '#/components/schemas/Amount' }
-        currency:
-          oneOf:
-            - $ref: '#/components/schemas/Currency'
-            - type: 'null'
+        borrower: { type: string, maxLength: 64, description: Borrower's username. }
+        companyCode: { type: [string, 'null'], maxLength: 8, description: Borrower's company code. }
+        corpCode: { type: [string, 'null'], maxLength: 8 }
+        principal: { type: string, description: 'A number; thousands separators are accepted, e.g. "25,000,000".' }
+        currency: { type: [string, 'null'], description: 'AIC, CIS, ICA, NCC, or null / "N/A" for non-cash.' }
         issuedOn: { type: string, format: date }
-        durationWeeks: { type: [number, 'null'] }
-        loanType: { $ref: '#/components/schemas/LoanType' }
-        status: { $ref: '#/components/schemas/Status' }
-        outstanding:
-          oneOf:
-            - $ref: '#/components/schemas/Amount'
-            - type: 'null'
-        notes: { type: [string, 'null'] }
+        durationWeeks: { type: [number, string, 'null'] }
+        status: { type: string, description: 'A status key or its label, e.g. "in_progress" or "In Progress".' }
+        notes: { type: [string, 'null'], maxLength: 2000 }
+
+    ReportResult:
+      type: object
+      required: [loan, created, changed]
+      properties:
+        loan: { $ref: '#/components/schemas/Loan' }
+        created: { type: boolean }
+        changed:
+          type: array
+          items: { type: string }
+          description: Fields this report altered. Empty when it matched what was on record.
 
     Exposure:
       type: object
