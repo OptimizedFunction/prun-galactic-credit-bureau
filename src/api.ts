@@ -1,4 +1,5 @@
-// Public API, mounted at /api/v1. Reading needs no key; editing needs a Discord sign-in. The contract is openapi.yaml.
+// Public API, mounted at /api/v1. Reading needs no key; editing needs a Discord sign-in; reporting needs a
+// lender API key. The contract is openapi.yaml.
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { currentUser, type SessionUser } from './auth';
@@ -242,13 +243,20 @@ api.post('/loans', async (c) => {
 api.patch('/loans/:id', async (c) => {
   const user = await editor(c);
   const id = loanId(c);
-  const { expected, ...fields } = await jsonBody(c);
+  const { expected, ...sent } = await jsonBody(c);
   if (expected !== undefined && (expected === null || typeof expected !== 'object' || Array.isArray(expected))) {
     throw new ApiError(400, 'bad_request', '"expected" must be an object of the values you were looking at.');
   }
+  // The bureau sets a loan's trust label and records reasons itself. An undo echoes back what a revision
+  // held, which can include both, so they are dropped here instead of being refused.
+  const editable = (values: Record<string, unknown>) => {
+    const { trust: _trust, reason: _reason, ...rest } = values;
+    return rest;
+  };
+  const fields = editable(sent);
   try {
     const changed = await edits.updateLoan(c.env.DB, id, edits.parseLoanFields(fields), user, {
-      expected: expected ? edits.parseLoanFields(expected as Record<string, unknown>) : undefined,
+      expected: expected ? edits.parseLoanFields(editable(expected as Record<string, unknown>)) : undefined,
     });
     return json({ loan: await q.getLoan(c.env.DB, id), changed });
   } catch (err) {
@@ -340,5 +348,46 @@ api.post('/fio-keys', async (c) => {
 api.delete('/fio-keys/:username', async (c) => {
   const user = await editor(c);
   await lenderKeys.disconnectLender(c.env.DB, c.req.param('username'), user);
+  return json({ ok: true });
+});
+
+// ---- Lenders reporting loans with an API key ----
+
+/** The lender whose API key came with the request ("Authorization: Bearer <key>"). */
+async function lenderFromKey(c: Ctx): Promise<{ id: number; username: string }> {
+  const header = c.req.header('Authorization') ?? '';
+  const key = /^Bearer\s+/i.test(header) ? header.replace(/^Bearer\s+/i, '').trim() : '';
+  const lender = key ? await lenderKeys.lenderForApiKey(c.env.DB, key) : null;
+  if (!lender) throw new ApiError(401, 'unauthorized', 'Send your lender API key as "Authorization: Bearer <key>".');
+  const take = await takeFromDb(c.env.DB, `lender:${lender.id}`, WRITE_LIMIT);
+  if (!take.allowed) throw tooMany(take, WRITE_LIMIT, 'reports');
+  return lender;
+}
+
+/** Report a loan. Idempotent by contract ID: create on first sight, update after, nothing if unchanged. */
+api.put('/lenders/:username/loans/:contractId', async (c) => {
+  const lender = await lenderFromKey(c);
+  if (lender.username.toLowerCase() !== c.req.param('username').toLowerCase()) {
+    throw new ApiError(403, 'forbidden', `This key belongs to ${lender.username}. A lender can only report their own loans.`);
+  }
+  const contractId = normalizeContractId(c.req.param('contractId'));
+  if (contractId === null || !/^[A-Z0-9]{1,16}$/.test(contractId)) throw new ApiError(400, 'bad_request', 'The contract ID must be 1 to 16 letters and digits.');
+
+  const result = await edits.reportLoan(c.env.DB, lender, contractId, edits.parseLoanFields(await jsonBody(c)));
+  return json({ loan: await q.getLoan(c.env.DB, result.loanId), created: result.created, changed: result.changed }, result.created ? 201 : 200);
+});
+
+/** Create (or replace) the reporting API key of a lender the signed-in user connected. The key is shown this once. */
+api.post('/lender-keys', async (c) => {
+  const user = await editor(c);
+  const body = await jsonBody(c);
+  const username = typeof body['username'] === 'string' ? body['username'].trim() : '';
+  if (username === '') throw new ApiError(400, 'bad_request', 'Say which lender the key is for ("username").');
+  return json(await lenderKeys.createApiKey(c.env.DB, username, user), 201, { 'Cache-Control': 'no-store' });
+});
+
+api.delete('/lender-keys/:username', async (c) => {
+  const user = await editor(c);
+  await lenderKeys.revokeApiKey(c.env.DB, c.req.param('username'), user);
   return json({ ok: true });
 });

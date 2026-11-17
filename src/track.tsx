@@ -16,6 +16,11 @@ form.track label { display: grid; gap: 4px; font-weight: 600; }
 form.track input { padding: 9px 10px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
 form.track button, button.plain { justify-self: start; padding: 9px 16px; font: inherit; font-weight: 600; color: #fff; background: #1558b0; border: 0; border-radius: 6px; cursor: pointer; }
 button.plain { color: var(--bad); background: none; border: 1px solid var(--line); font-weight: 400; padding: 4px 10px; }
+.apikey { margin-top: 4px; font-size: 14px; }
+button.plain.link { color: var(--link); }
+.keybox { display: grid; gap: 8px; justify-items: start; margin: 12px 0; padding: 12px 14px; border: 1px solid #f2b84b; border-radius: 8px; }
+.keybox[hidden] { display: none; }
+.keybox code { padding: 6px 8px; background: var(--chip); border-radius: 4px; overflow-wrap: anywhere; user-select: all; }
 #track-msg { min-height: 1.5em; font-weight: 600; }
 #track-msg.ok { color: var(--good); } #track-msg.err { color: var(--bad); }
 ul.plainlist { margin: 0; padding-left: 20px; }
@@ -50,9 +55,37 @@ const TRACK_SCRIPT = `
     }
   });
   document.addEventListener('click', async (e) => {
+    const create = e.target.closest('button[data-key-create]');
+    if (create) {
+      if (create.dataset.replace && !confirm('Replace the API key for ' + create.dataset.keyCreate + '? The current key stops working at once.')) return;
+      try {
+        const data = await call('POST', '/api/v1/lender-keys', { username: create.dataset.keyCreate });
+        document.getElementById('key-value').textContent = data.apiKey;
+        document.getElementById('key-once').hidden = false;
+        say('API key created for ' + data.username + '.');
+      } catch (err) {
+        say(err.message, true);
+      }
+      return;
+    }
+    const revoke = e.target.closest('button[data-key-revoke]');
+    if (revoke) {
+      if (!confirm('Revoke the API key for ' + revoke.dataset.keyRevoke + '? Anything using it will stop working.')) return;
+      try {
+        await call('DELETE', '/api/v1/lender-keys/' + encodeURIComponent(revoke.dataset.keyRevoke));
+        location.reload();
+      } catch (err) {
+        say(err.message, true);
+      }
+      return;
+    }
+    if (e.target.id === 'key-copy' && navigator.clipboard) {
+      navigator.clipboard.writeText(document.getElementById('key-value').textContent).then(() => say('Key copied.'));
+      return;
+    }
     const btn = e.target.closest('button[data-disconnect]');
     if (!btn) return;
-    if (!confirm('Disconnect ' + btn.dataset.disconnect + '? The stored key is deleted and automatic tracking stops. Loans already recorded stay.')) return;
+    if (!confirm('Disconnect ' + btn.dataset.disconnect + '? The stored FIO key and any reporting API key are deleted, and automatic tracking stops. Loans already recorded stay.')) return;
     try {
       await call('DELETE', '/api/v1/fio-keys/' + encodeURIComponent(btn.dataset.disconnect));
       location.reload();
@@ -123,10 +156,42 @@ trackPages.get('/track', async (c) => {
                       Disconnect
                     </button>
                     {sync && !sync.ok && <div class="muted">Paste a new key above to reconnect. Your recorded loans stay as they are meanwhile.</div>}
+                    <div class="apikey">
+                      Reporting API key:{' '}
+                      {l.apiKeyPrefix ? (
+                        <>
+                          <code>{l.apiKeyPrefix}…</code> <span class="muted">created {l.apiKeyCreatedAt?.slice(0, 10)}</span>{' '}
+                          <button type="button" class="plain link" data-key-create={l.username} data-replace="1">
+                            Replace
+                          </button>{' '}
+                          <button type="button" class="plain" data-key-revoke={l.username}>
+                            Revoke
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span class="muted">none</span>{' '}
+                          <button type="button" class="plain link" data-key-create={l.username}>
+                            Create
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </li>
                 );
               })}
             </ul>
+            <div id="key-once" class="keybox" hidden>
+              <strong>Your new API key. Copy it now; it is not shown again.</strong>
+              <code id="key-value"></code>
+              <button type="button" class="plain link" id="key-copy">
+                Copy
+              </button>
+            </div>
+            <p class="muted">
+              A reporting key lets your own tools record loans the game cannot see, such as advances or sponsored bases, through the{' '}
+              <a href="/api">API</a>. Loans already tracked from FIO do not need it.
+            </p>
             <p>
               <a href="/my-lending">Go to My lending</a>
             </p>

@@ -207,7 +207,7 @@ const show = showValue;
 
 /** The request that reverses a change, or null if it cannot be undone from here. */
 function undoRequest(change: q.Change): { method: string; url: string; body?: unknown } | null {
-  if (change.actorType !== 'user') return null;
+  if (change.actorType === 'system') return null;
   const url = `/api/v1/loans/${change.loanId}`;
   const before = (change.before ?? {}) as Record<string, unknown>;
   if (change.action === 'delete') return change.loanDeleted ? { method: 'POST', url: `${url}/restore` } : null;
