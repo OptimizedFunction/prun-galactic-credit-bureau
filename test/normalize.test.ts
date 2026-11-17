@@ -114,3 +114,24 @@ test('status history rows parse, blank old status means first seen', () => {
   assert.equal(entries[1]!.newStatus, 'stale');
   assert.equal(issues.length, 1);
 });
+
+test('revisions are described in words', async () => {
+  const { describeRevision, showValue } = await import('../src/lib/changeText');
+  assert.equal(showValue('principal', '25000000.00'), '25,000,000');
+  assert.equal(showValue('status', 'in_progress'), 'In Progress');
+  assert.equal(showValue('trust', 'fio_verified'), 'FIO-verified');
+  assert.equal(showValue('notes', null), 'blank');
+  assert.equal(showValue('autoTrack', false), 'off');
+
+  assert.deepEqual(describeRevision({ action: 'update', before: { status: 'stale' }, after: { status: 'complete', reason: 'assumed repaid' } }), {
+    summary: 'Changed',
+    lines: [{ label: 'Status', from: 'Stale', to: 'Complete' }],
+    note: 'assumed repaid',
+  });
+  assert.deepEqual(describeRevision({ action: 'update', before: { durationWeeks: 0 }, after: { durationWeeks: 14 } }).lines, [{ label: 'Duration (weeks)', from: '0', to: '14' }]);
+  assert.equal(describeRevision({ action: 'update', before: { deleted: true }, after: { deleted: false } }).summary, 'Restored');
+  assert.equal(describeRevision({ action: 'delete', before: { lender: 'A' }, after: null }).summary, 'Deleted');
+  assert.equal(describeRevision({ action: 'import', before: null, after: { Lender: 'A' } }).summary, 'Imported from the Google Sheet');
+  const added = describeRevision({ action: 'create', before: null, after: { lender: 'A', borrower: 'B', principal: '1000.00', currency: null, status: 'complete' } });
+  assert.deepEqual(added.lines.map((l) => `${l.label}=${l.to}`), ['Lender=A', 'Borrower=B', 'Amount=1,000', 'Status=Complete']);
+});

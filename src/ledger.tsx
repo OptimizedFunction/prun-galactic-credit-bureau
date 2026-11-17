@@ -4,6 +4,7 @@ import ledgerScript from '../assets/ledger.client.js';
 import { currentUser } from './auth';
 import * as q from './db/queries';
 import { Layout } from './pages';
+import { FIELD_LABELS, showValue } from './lib/changeText';
 import { STATUS_LABELS, type Status } from './lib/normalize';
 import type { Env } from './env';
 
@@ -177,29 +178,7 @@ ledgerPages.get('/ledger', async (c) => {
   );
 });
 
-const FIELD_LABELS: Record<string, string> = {
-  lender: 'Lender',
-  borrower: 'Borrower',
-  companyCode: 'CO',
-  corpCode: 'CORP',
-  principal: 'Amount',
-  currency: 'Currency',
-  issuedOn: 'Issued',
-  durationWeeks: 'Weeks',
-  status: 'Status',
-  contractId: 'Contract',
-  autoTrack: 'Auto track',
-  notes: 'Notes',
-  trust: 'Trust',
-  deleted: 'Deleted',
-};
-
-const show = (field: string, value: unknown): string => {
-  if (value === null || value === undefined || value === '') return 'blank';
-  if (field === 'status' && typeof value === 'string' && value in STATUS_LABELS) return STATUS_LABELS[value as Status];
-  if (typeof value === 'boolean') return value ? 'yes' : 'no';
-  return String(value);
-};
+const show = showValue;
 
 /** The request that reverses a change, or null if it cannot be undone from here. */
 function undoRequest(change: q.Change): { method: string; url: string; body?: unknown } | null {
