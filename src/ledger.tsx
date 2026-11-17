@@ -439,12 +439,15 @@ ledgerPages.get('/changes', async (c) => {
                         ('deleted' in after ? (
                           <>Restored the loan</>
                         ) : (
-                          Object.keys(after).map((field) => (
-                            <div>
-                              {FIELD_LABELS[field] ?? field}: {show(field, before[field])} → <strong>{show(field, after[field])}</strong>
-                            </div>
-                          ))
+                          Object.keys(after)
+                            .filter((field) => field !== 'reason')
+                            .map((field) => (
+                              <div>
+                                {FIELD_LABELS[field] ?? field}: {show(field, before[field])} → <strong>{show(field, after[field])}</strong>
+                              </div>
+                            ))
                         ))}
+                      {typeof after['reason'] === 'string' && <div class="muted">{after['reason']}</div>}
                     </td>
                     <td>
                       {undo && (

@@ -747,7 +747,8 @@ paths:
         For each loan the account touched: a loan it added is deleted, a loan it deleted is restored, and
         each field it changed returns to what it held before the account's first change in the period.
         A field someone else has changed since is left alone and listed in `skipped`. The rollback is
-        recorded in each loan's history as the system, with the reason. Running it twice is harmless.
+        recorded in each loan's history and in `/changes` under the maintainer who ran it, with a reason naming
+        whose changes it undid and since when. Running it twice is harmless.
       security:
         - session: []
       requestBody:

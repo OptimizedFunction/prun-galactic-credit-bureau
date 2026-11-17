@@ -188,7 +188,8 @@ the version history, and three tools build on it, from lightest to heaviest:
 2. **Block an account and roll back everything it did.** Maintainers only, from the Maintainer tools panel on
    Recent changes (filter by the person first). A rollback deletes loans the account added, restores loans it
    deleted and puts back the fields it changed, since a time you choose. Fields someone else has changed since
-   are left alone and listed. Lender API keys can be blocked and rolled back the same way.
+   are left alone and listed. Lender API keys can be blocked and rolled back the same way. The rollback shows in
+   Recent changes under the maintainer who ran it, next to the changes it undid, with the reason.
 3. **Restore the whole database.** D1 keeps 30 days of history (Time Travel). To go back to a moment:
 
    ```sh

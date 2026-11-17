@@ -70,6 +70,7 @@ interface RevisionRow {
   id: number;
   entity_id: number;
   action: string;
+  actor: string;
   before_json: string | null;
   after_json: string | null;
 }
@@ -83,19 +84,22 @@ const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === 
  * For each loan it touched: a loan it added is deleted; a loan it deleted is restored; each field it
  * changed goes back to what it held before the account's first change in the period. A field that someone
  * else has changed since is left alone and reported, so honest later work is never overwritten.
- * The rollback is itself recorded in each loan's history, as the system, with the reason.
+ * The rollback is itself recorded in each loan's history under the maintainer who ran it, like any edit, with a
+ * reason naming whose changes it undid and from when, so the change log reads as one unbroken account.
  */
 export async function rollbackActor(db: D1Database, actorId: string, since: string, admin: Admin, reason?: string): Promise<RollbackResult> {
   const { results } = await db
-    .prepare("SELECT id, entity_id, action, before_json, after_json FROM revisions WHERE entity_type = 'loan' AND actor_id = ? AND created_at >= ? ORDER BY id")
+    .prepare("SELECT id, entity_id, action, actor, before_json, after_json FROM revisions WHERE entity_type = 'loan' AND actor_id = ? AND created_at >= ? ORDER BY id")
     .bind(actorId, since)
     .all<RevisionRow>();
 
   const byLoan = new Map<number, RevisionRow[]>();
   for (const r of results) byLoan.set(r.entity_id, [...(byLoan.get(r.entity_id) ?? []), r]);
 
-  const system: Editor = { id: 'system', name: 'rollback', kind: 'system' };
-  const why = `Rolled back by ${admin.name}${reason ? `: ${reason}` : ''}`;
+  const maintainer: Editor = { id: admin.id, name: admin.name, kind: 'maintainer' };
+  // Named by the name they last used (a Discord name can change); the ID is what the rollback went by.
+  const whose = results.length > 0 ? results[results.length - 1]!.actor : actorId;
+  const why = `Rolled back changes by ${whose} since ${since.slice(0, 16).replace('T', ' ')} UTC${reason ? `: ${reason}` : ''}`;
   const result: RollbackResult = { loans: byLoan.size, removed: 0, restored: 0, reverted: 0, skipped: [] };
 
   for (const [loanId, revisions] of byLoan) {
@@ -104,7 +108,7 @@ export async function rollbackActor(db: D1Database, actorId: string, since: stri
     // The account added this loan: it goes, whatever was done to it afterwards.
     if (revisions[0]!.action === 'create') {
       if (!now.deleted) {
-        await deleteLoan(db, loanId, system, new Date(), why);
+        await deleteLoan(db, loanId, maintainer, new Date(), why);
         result.removed++;
       }
       continue;
@@ -134,10 +138,10 @@ export async function rollbackActor(db: D1Database, actorId: string, since: stri
     if ('deleted' in original && now.deleted !== original['deleted']) {
       if (!same(now.deleted, lastSet['deleted'])) result.skipped.push(`loan #${loanId}: deleted`);
       else if (original['deleted'] === false && now.deleted) {
-        await restoreLoan(db, loanId, system, new Date(), why);
+        await restoreLoan(db, loanId, maintainer, new Date(), why);
         result.restored++;
       } else if (original['deleted'] === true && !now.deleted) {
-        await deleteLoan(db, loanId, system, new Date(), why);
+        await deleteLoan(db, loanId, maintainer, new Date(), why);
         result.removed++;
         continue;
       }
@@ -154,7 +158,7 @@ export async function rollbackActor(db: D1Database, actorId: string, since: stri
     const trust = 'trust' in original && now.trust === lastSet['trust'] ? (original['trust'] as Trust) : undefined;
     if (Object.keys(patch).length === 0 && trust === undefined) continue;
 
-    const changed = await updateLoan(db, loanId, parseLoanFields(patch), system, { trust, reason: why });
+    const changed = await updateLoan(db, loanId, parseLoanFields(patch), maintainer, { trust, reason: why });
     if (changed.length > 0 || trust !== undefined) result.reverted++;
   }
   return result;

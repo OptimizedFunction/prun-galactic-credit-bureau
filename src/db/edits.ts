@@ -20,15 +20,21 @@ export interface Editor {
   id: string;
   /** Shown in the history: the Discord username, the lender's username, or the job's name. */
   name: string;
-  /** Defaults to a signed-in Discord user. */
-  kind?: 'user' | 'lender' | 'system';
+  /**
+   * Defaults to a signed-in Discord user. A maintainer is a Discord user putting things back (a rollback): recorded
+   * under their own name like any user, so the change log shows who did it, but allowed what the system is
+   * (editing tracked loans, keeping the trust label).
+   */
+  kind?: 'user' | 'lender' | 'system' | 'maintainer';
 }
 
-const actorType = (editor: Editor): 'user' | 'lender' | 'system' => editor.kind ?? 'user';
+const actorType = (editor: Editor): 'user' | 'lender' | 'system' => (editor.kind === 'maintainer' ? 'user' : (editor.kind ?? 'user'));
+/** The system and maintainers putting things back are not held to the rules for tracked loans. */
+const restoring = (editor: Editor): boolean => editor.kind === 'system' || editor.kind === 'maintainer';
 /** Status changes are logged by where they came from. */
 const historySource = (editor: Editor): 'edit' | 'api' => (editor.kind === 'lender' ? 'api' : 'edit');
 /** What a loan's facts are worth once this editor has set them. The system leaves the label alone. */
-const trustAfter = (editor: Editor, current: Trust): Trust => (editor.kind === 'lender' ? 'lender_reported' : editor.kind === 'system' ? current : 'community_edited');
+const trustAfter = (editor: Editor, current: Trust): Trust => (editor.kind === 'lender' ? 'lender_reported' : restoring(editor) ? current : 'community_edited');
 
 /** The editable fields, in the shape the API accepts them. */
 export interface LoanFields {
@@ -377,9 +383,9 @@ async function tryUpdate(db: D1Database, id: number, input: Partial<LoanFields>,
   }
 
   // A loan the sync manages only takes notes and the tracking switch, unless this same edit switches tracking off.
-  // The system (a rollback) is putting things back, so it is not held to this.
+  // A rollback (the system or a maintainer) is putting things back, so it is not held to this.
   const staysTracked = current.autoTrack && after.autoTrack !== false;
-  if (editor.kind !== 'system' && staysTracked && changed.some((k) => !TRACKED_EDITABLE.includes(apiName(k)))) {
+  if (!restoring(editor) && staysTracked && changed.some((k) => !TRACKED_EDITABLE.includes(apiName(k)))) {
     if (editor.kind === 'lender') throw new EditError('conflict', 'This loan is kept up to date from FIO, so reports for it are not applied.');
     throw new EditError('conflict', 'This loan is kept up to date from FIO. Only Notes can be edited; untick Auto track to edit the rest.');
   }
@@ -446,7 +452,7 @@ async function tryUpdate(db: D1Database, id: number, input: Partial<LoanFields>,
 export async function deleteLoan(db: D1Database, id: number, editor: Editor, now = new Date(), reason?: string): Promise<void> {
   const row = await loadRow(db, id);
   if (row.deleted_at) return;
-  if (row.auto_track === 1 && editor.kind !== 'system') throw new EditError('conflict', 'This loan is kept up to date from FIO and cannot be deleted. Untick Auto track first.');
+  if (row.auto_track === 1 && !restoring(editor)) throw new EditError('conflict', 'This loan is kept up to date from FIO and cannot be deleted. Untick Auto track first.');
   const nowIso = now.toISOString();
   await db.batch([
     db

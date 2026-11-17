@@ -59,11 +59,17 @@ test('a rollback undoes one account and nobody else', async () => {
   assert.ok((await loan(fake)).deletedAt, 'the fake loan is gone');
   assert.equal((await loan(untouched)).notes, 'paid early', "Ann's edit stands");
 
-  // The rollback is in the history, as the system, with the reason; the vandal's own entries stay as a record.
+  // The rollback is in the history under the maintainer who ran it, with a reason saying whose changes it undid;
+  // the vandal's own entries stay as a record.
   const [latest, ...earlier] = await q.getRevisions(db, 'loan', edited);
-  assert.deepEqual({ actorType: latest!.actorType, actor: latest!.actor }, { actorType: 'system', actor: 'rollback' });
-  assert.equal((latest!.after as Record<string, unknown>)['reason'], 'Rolled back by maintainer: vandalism');
+  assert.deepEqual({ actorType: latest!.actorType, actor: latest!.actor, actorId: latest!.actorId }, { actorType: 'user', actor: 'maintainer', actorId: '999' });
+  assert.equal((latest!.after as Record<string, unknown>)['reason'], 'Rolled back changes by vandal since 2000-01-01 00:00 UTC: vandalism');
   assert.equal(earlier.filter((r) => r.actor === 'vandal').length, 2);
+  // So the change log shows the reversal by default, next to what it reversed, for every loan it touched.
+  const log = await q.listChanges(db, { includeSystem: false, limit: 50, offset: 0 });
+  const byMaintainer = log.filter((c) => c.actor === 'maintainer');
+  assert.deepEqual(byMaintainer.map((c) => c.loanId).sort(), [edited, deleted, fake].sort());
+  assert.ok(byMaintainer.every((c) => String((c.after as Record<string, unknown>)['reason']).startsWith('Rolled back changes by vandal')));
 
   // Running it again finds nothing left to do.
   const again = await rollbackActor(db, VANDAL.id, LONG_AGO, ADMIN);
@@ -111,7 +117,7 @@ test('a loan the account deleted and someone else already restored needs nothing
   const result = await rollbackActor(db, VANDAL.id, LONG_AGO, ADMIN);
   assert.deepEqual({ restored: result.restored, removed: result.removed, skipped: result.skipped.filter((s) => s.startsWith(`loan #${id}:`)) }, { restored: 0, removed: 0, skipped: [] });
   assert.equal((await loan(id)).deletedAt, null);
-  assert.equal((await q.getRevisions(db, 'loan', id)).some((r) => r.actor === 'rollback'), false, 'nothing was written for it');
+  assert.equal((await q.getRevisions(db, 'loan', id)).some((r) => r.actor === ADMIN.name), false, 'nothing was written for it');
 });
 
 test("a lender's reports can be rolled back by the lender key's ID", async () => {
@@ -125,4 +131,28 @@ test("a lender's reports can be rolled back by the lender key's ID", async () =>
   assert.ok((await loan(made.loanId)).deletedAt);
   // A lender left with no loans drops out of the lenders list.
   assert.equal((await q.listLenders(db)).some((l) => l.username === 'Reporter'), false);
+});
+
+test('migration 0011 moves old system rollback entries onto the maintainer who ran them', async () => {
+  const { readFileSync } = await import('node:fs');
+  const id = await add(ANN);
+  await updateLoan(db, id, parseLoanFields({ notes: 'by the maintainer' }), ADMIN);
+  // How rollbacks used to be recorded: as the system, naming the maintainer only in the reason.
+  const legacy = (reason: string) =>
+    db
+      .prepare("INSERT INTO revisions (entity_type, entity_id, action, actor_type, actor, actor_id, before_json, after_json) VALUES ('loan', ?, 'update', 'system', 'rollback', 'system', '{}', ?)")
+      .bind(id, JSON.stringify({ notes: null, reason }))
+      .run();
+  await legacy('Rolled back by Maintainer: vandalism');
+  await legacy('Rolled back by maintainer');
+
+  await db.prepare(readFileSync('migrations/0011_rollbacks_by_maintainer.sql', 'utf8').replace(/;\s*$/, '')).run();
+  const moved = (await q.getRevisions(db, 'loan', id)).filter((r) => typeof (r.after as Record<string, unknown>)['reason'] === 'string');
+  assert.deepEqual(
+    moved.map((r) => [r.actorType, r.actor, r.actorId]),
+    [
+      ['user', 'maintainer', '999'],
+      ['user', 'Maintainer', '999'],
+    ],
+  );
 });
