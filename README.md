@@ -50,6 +50,33 @@ npm run dev      # http://localhost:8787
 Other commands: `npm test` (unit tests), `npm run typecheck`, `npm run db:reset` (delete and recreate the
 local database; stop `npm run dev` first).
 
+### Pulling later sheet changes into a database that is in use
+
+`sheet:import` starts from nothing. Once people edit on the site, use `sheet:migrate` instead: it downloads
+the sheet and reconciles it with the database, without emptying anything.
+
+```
+npm run sheet:migrate                        # look only, local database
+npm run sheet:migrate -- --apply             # change the local database
+npm run sheet:migrate -- --remote            # look only, production (needs `npx wrangler login`)
+npm run sheet:migrate -- --remote --apply    # change production
+```
+
+Sheet rows are matched to loans by contract ID, then by lender, borrower, amount, currency and date, then
+by the sheet row they were imported from. For each field of a matched loan:
+
+| Situation | Result |
+|---|---|
+| Only the sheet changed it since the last import | The sheet's value is taken, recorded in the loan's history as "Update from the Google Sheet" |
+| Only the site changed it | The site's value is kept |
+| Both changed it, differently | Conflict: the site is kept and the field is listed. Add `--prefer-sheet` to take the sheet instead |
+| The site keeps the loan up to date from FIO | Only notes are reconciled; FIO decides the rest |
+
+Sheet rows with no loan on the site are added. Nothing is deleted: loans that left the sheet or were deleted
+on the site are only listed. Every run writes `data/migration-report-local.md` or `-production.md` with each
+change, and running it again after `--apply` finds nothing left to do. A production run prints the
+`wrangler d1 time-travel restore` command that undoes it.
+
 ### FIO sync
 
 The sync runs hourly as a cron trigger. It reads each tracked lender's loan contracts from FIO using:

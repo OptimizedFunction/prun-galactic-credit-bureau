@@ -11,6 +11,7 @@
     "sheet:fetch": "tsx scripts/fetch-sheet.ts",
     "sheet:import": "tsx scripts/import-sheet.ts",
     "sheet:verify": "tsx scripts/verify-import.ts",
+    "sheet:migrate": "npm run sheet:fetch && tsx scripts/migrate-sheet.ts",
     "seed": "npm run db:migrate && npm run sheet:fetch && npm run sheet:import && npm run sheet:verify",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/normalize.test.ts test/sync.test.ts test/edits.test.ts test/keys.test.ts test/ratelimit.test.ts test/admin.test.ts test/reconcile.test.ts",

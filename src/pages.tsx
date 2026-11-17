@@ -1120,7 +1120,7 @@ interface TimelineEvent {
   raw: Record<string, string> | null;
 }
 
-const SYSTEM_ACTORS: Record<string, string> = { 'fio-sync': 'FIO sync', 'sheet-import': 'Import from the Google Sheet' };
+const SYSTEM_ACTORS: Record<string, string> = { 'fio-sync': 'FIO sync', 'sheet-import': 'Import from the Google Sheet', 'sheet-migration': 'Update from the Google Sheet' };
 const HISTORY_SOURCES: Record<string, string> = { fio_sync: 'FIO sync', sheet_import: "The Google Sheet's sync", edit: 'Edited by hand', api: 'Lender report' };
 
 /** One list, newest first, of everything that happened to a loan: status changes and edits together. */
