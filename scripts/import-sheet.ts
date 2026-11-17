@@ -41,18 +41,18 @@ try {
     ),
   );
 
-  // Lenders: those on the Lender Sync tab are tracked through FIO, the rest are manual.
-  const fioTracked = new Set(lenderSync.map((s) => s.lender.toLowerCase()));
+  // Every lender starts untracked. Tracking begins when a lender connects their own FIO key on the site;
+  // the sheet's Lender Sync tab only says who its script used to fetch.
   const lenderNames = new Map(parties.lenders.map((l) => [l.username.toLowerCase(), l.username]));
   for (const s of lenderSync) {
     if (!lenderNames.has(s.lender.toLowerCase())) lenderNames.set(s.lender.toLowerCase(), s.lender);
   }
   await runBatched(
     db,
-    [...lenderNames.entries()].map(([key, username]) =>
+    [...lenderNames.values()].map((username) =>
       db
-        .prepare('INSERT INTO lenders (username, tracking_mode, created_at) VALUES (?, ?, ?)')
-        .bind(username, fioTracked.has(key) ? 'fio' : 'manual', importedAt),
+        .prepare("INSERT INTO lenders (username, tracking_mode, created_at) VALUES (?, 'manual', ?)")
+        .bind(username, importedAt),
     ),
   );
 
@@ -196,7 +196,7 @@ try {
     '',
     `- Ledger rows read: ${ledger.loans.length + ledger.issues.filter((i) => i.kind === 'skipped').length}`,
     `- Loans imported: ${counts.loans}`,
-    `- Lenders: ${counts.lenders} (${fioTracked.size} tracked through FIO)`,
+    `- Lenders: ${counts.lenders} (${lenderSync.length} were fetched by the sheet's script)`,
     `- Borrowers: ${counts.borrowers}`,
     `- Status history entries: ${matched.length} of ${history.entries.length} from the sheet`,
     `- Lender sync results: ${counts.syncRuns}`,

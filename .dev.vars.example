@@ -5,10 +5,6 @@
 # Changing it later makes every stored key unreadable (lenders would have to connect again).
 FIO_KEY_SECRET=
 
-# Optional: FIO API key of a bureau FIO account, used for lenders who granted it contract permission
-# instead of connecting their own key.
-FIO_API_KEY=
-
 # Discord OAuth application, for sign-in.
 DISCORD_CLIENT_ID=
 DISCORD_CLIENT_SECRET=

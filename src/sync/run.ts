@@ -1,4 +1,4 @@
-// The sync job: fetch every FIO-tracked lender, decide (plan.ts), then write everything in one transaction.
+// The sync job: fetch every lender who connected a FIO key, each with their own key, decide (plan.ts), then write everything in one transaction.
 //
 // Safe to overlap with itself: loans are upserted by their unique contract ID and every status write is
 // conditional on the status actually differing, so a second run finds nothing left to do.
@@ -18,44 +18,37 @@ export interface SyncSummary {
 }
 
 export interface SyncKeys {
-  /** Key of the bureau's own FIO account, used for lenders who granted it contract permission. */
-  bureauKey?: string;
-  /** Decrypts the keys lenders connected themselves. */
+  /** Decrypts the keys lenders connected themselves. There is no shared key: a lender without one is not fetched. */
   keySecret?: string;
 }
 
 export interface TrackedLender {
   id: number;
   username: string;
-  /** The key to fetch this lender with: their own if they connected one, otherwise the bureau's. */
+  /** The key this lender connected, or null if it can no longer be read. */
   key: string | null;
-  ownKey: boolean;
-  /** Why there is no usable key, if there is none. */
+  /** Why the key cannot be used, if it cannot. */
   problem: string | null;
 }
 
-/** Every lender the sync should fetch, with the key to use for each. */
+/** Every lender the sync should fetch: those who connected a FIO key, each with their own. */
 export async function trackedLenders(db: D1Database, keys: SyncKeys): Promise<TrackedLender[]> {
   const { results } = await db
-    .prepare("SELECT id, username, fio_key_enc FROM lenders WHERE tracking_mode = 'fio' ORDER BY username")
-    .all<{ id: number; username: string; fio_key_enc: string | null }>();
+    .prepare("SELECT id, username, fio_key_enc FROM lenders WHERE tracking_mode = 'fio' AND fio_key_enc IS NOT NULL ORDER BY username")
+    .all<{ id: number; username: string; fio_key_enc: string }>();
   return Promise.all(
     results.map(async (l): Promise<TrackedLender> => {
-      if (l.fio_key_enc !== null) {
-        const own = keys.keySecret ? await unseal(l.fio_key_enc, keys.keySecret) : null;
-        if (own !== null) return { id: l.id, username: l.username, key: own, ownKey: true, problem: null };
-        if (!keys.bureauKey) return { id: l.id, username: l.username, key: null, ownKey: true, problem: 'The stored FIO key could not be read; it needs connecting again' };
-      }
-      return { id: l.id, username: l.username, key: keys.bureauKey ?? null, ownKey: false, problem: keys.bureauKey ? null : 'No FIO key is available for this lender' };
+      const key = keys.keySecret ? await unseal(l.fio_key_enc, keys.keySecret) : null;
+      return { id: l.id, username: l.username, key, problem: key === null ? 'The stored FIO key could not be read; it needs connecting again' : null };
     }),
   );
 }
 
-/** Fetches one lender's contracts with the right key, with errors worded for the Lenders page. */
+/** Fetches one lender's contracts with their key, with errors worded for the Lenders page. */
 export async function fetchTracked(lender: TrackedLender, fetchLoans: NonNullable<SyncDeps['fetchLoans']>): Promise<LoanFetchResult> {
   if (lender.key === null) return { lender: lender.username, httpStatus: null, contracts: null, error: lender.problem };
   const result = await fetchLoans(lender.key, lender.username);
-  if (lender.ownKey && result.httpStatus === 401) return { ...result, error: 'FIO rejected the API key this lender connected' };
+  if (result.httpStatus === 401) return { ...result, error: 'FIO rejected the API key this lender connected' };
   return result;
 }
 
@@ -84,7 +77,7 @@ export async function runSync(db: D1Database, keys: SyncKeys, deps: SyncDeps = {
   const lenders = await trackedLenders(db, keys);
   const lenderIds = new Map(lenders.map((l) => [l.username.toLowerCase(), l.id]));
   // Company lookups are public data in FIO, so any working key will do.
-  const lookupKey = keys.bureauKey ?? lenders.find((l) => l.key !== null)?.key ?? null;
+  const lookupKey = lenders.find((l) => l.key !== null)?.key ?? null;
 
   // Fetch every lender in parallel; one failing never blocks the others.
   const results = await Promise.all(lenders.map((l) => fetchTracked(l, fetchLoans)));

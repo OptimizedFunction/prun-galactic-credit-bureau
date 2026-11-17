@@ -1167,7 +1167,7 @@ components:
       properties:
         lender: { type: string }
         checkedAt: { type: string, format: date-time }
-        httpStatus: { type: [integer, 'null'], description: FIO's HTTP response code. 401 means the lender has not granted contract permission. }
+        httpStatus: { type: [integer, 'null'], description: FIO's HTTP response code. 401 means FIO rejected the key the lender connected. }
         contractsReturned: { type: [integer, 'null'] }
         loansKept: { type: [integer, 'null'], description: Contracts where this lender paid out the loan. }
         error: { type: [string, 'null'] }

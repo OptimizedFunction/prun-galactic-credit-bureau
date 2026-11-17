@@ -33,12 +33,12 @@ export default {
   /** Cron trigger (see wrangler.jsonc): housekeeping, then pull every tracked lender's loans from FIO. */
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await pruneBuckets(env.DB).catch((err) => console.error('Pruning rate-limit buckets failed', err));
-    if (!env.FIO_API_KEY && !env.FIO_KEY_SECRET) {
-      console.warn('FIO sync skipped: neither FIO_API_KEY nor FIO_KEY_SECRET is set.');
+    if (!env.FIO_KEY_SECRET) {
+      console.warn('FIO sync skipped: FIO_KEY_SECRET is not set.');
       return;
     }
     const graceDays = env.STALE_GRACE_DAYS ? Number(env.STALE_GRACE_DAYS) : undefined;
-    const summary = await runSync(env.DB, { bureauKey: env.FIO_API_KEY, keySecret: env.FIO_KEY_SECRET }, { graceDays });
+    const summary = await runSync(env.DB, { keySecret: env.FIO_KEY_SECRET }, { graceDays });
     console.log('FIO sync finished', JSON.stringify(summary));
   },
 } satisfies ExportedHandler<Env>;

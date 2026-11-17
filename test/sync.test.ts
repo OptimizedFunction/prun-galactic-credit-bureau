@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { FioContract, LoanFetchResult } from '../src/sync/fio';
 import { extractLoan, pastGrace, planSync, type ExistingLoan, type FioLoan } from '../src/sync/plan';
+import { seal } from '../src/lib/secretbox';
 import { runSync } from '../src/sync/run';
 import { tempDatabase } from './helpers';
 
@@ -144,13 +145,15 @@ test('plan: manual rows are never changed, only verified when FIO agrees', () =>
 
 // ---- runSync against a real (temporary) D1 database ----
 
+const SECRET = 'test-secret';
 let db: D1Database;
 let dispose: () => Promise<void>;
 
 before(async () => {
   ({ db, dispose } = await tempDatabase());
   await db.batch([
-    db.prepare("INSERT INTO lenders (username, tracking_mode) VALUES ('Lena', 'fio'), ('Denied', 'fio'), ('Manual', 'manual')"),
+    // Lena and Denied connected a FIO key; Manual did not, so the sync never fetches them.
+    db.prepare("INSERT INTO lenders (username, tracking_mode, fio_key_enc) VALUES ('Lena', 'fio', ?1), ('Denied', 'fio', ?1), ('Manual', 'manual', NULL)").bind(await seal('key', SECRET)),
     db.prepare("INSERT INTO borrowers (username, company_code) VALUES ('oldtimer', 'OLD')"),
     // A tracked loan that will be breached, and a manual row the sync must not alter.
     db.prepare(
@@ -169,7 +172,7 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
     now: DURING,
     fetchLoans: async (_key: string, lender: string): Promise<LoanFetchResult> =>
       lender === 'Denied'
-        ? { lender, httpStatus: 401, contracts: null, error: 'FIO permission not granted' }
+        ? { lender, httpStatus: 401, contracts: null, error: 'FIO rejected the API key' }
         : {
             lender,
             httpStatus: 200,
@@ -189,7 +192,7 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
     },
   };
 
-  const first = await runSync(db, { bureauKey: 'key' }, deps);
+  const first = await runSync(db, { keySecret: SECRET }, deps);
   assert.deepEqual(
     { inserted: first.inserted, statusChanges: first.statusChanges, verified: first.verified, lendersFailed: first.lendersFailed, lenders: first.lenders },
     { inserted: 2, statusChanges: 1, verified: 1, lendersFailed: 1, lenders: 2 },
@@ -242,7 +245,7 @@ test('runSync writes loans, history, borrowers and sync results, and is idempote
 
   // Second run with the same data: nothing new, no duplicate loans or history, no repeat company lookups.
   companyLookups.length = 0;
-  const second = await runSync(db, { bureauKey: 'key' }, { ...deps, now: new Date(DURING.getTime() + 3_600_000) });
+  const second = await runSync(db, { keySecret: SECRET }, { ...deps, now: new Date(DURING.getTime() + 3_600_000) });
   assert.deepEqual({ inserted: second.inserted, statusChanges: second.statusChanges, verified: second.verified, durationsRefreshed: second.durationsRefreshed },
     { inserted: 0, statusChanges: 0, verified: 0, durationsRefreshed: 0 },
   );

@@ -47,7 +47,7 @@ export interface LoanFetchResult {
   error: string | null;
 }
 
-/** Loan contracts of one user. Needs that user to have granted `permissionContracts` to the key's account. */
+/** Loan contracts of one user, read with that user's own key. */
 export async function fetchLoanContracts(apiKey: string, lender: string, fetcher: typeof fetch = fetch): Promise<LoanFetchResult> {
   try {
     const res = await fetcher(`${FIO_BASE}/contract/loans/${encodeURIComponent(lender)}?count=${LOAN_FETCH_COUNT}`, {
@@ -55,7 +55,7 @@ export async function fetchLoanContracts(apiKey: string, lender: string, fetcher
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status !== 200) {
-      const why = res.status === 401 ? 'FIO permission not granted' : res.status === 204 ? 'FIO has no data for this user' : `HTTP ${res.status}`;
+      const why = res.status === 401 ? 'FIO rejected the API key' : res.status === 204 ? 'FIO has no data for this user' : `HTTP ${res.status}`;
       return { lender, httpStatus: res.status, contracts: null, error: why };
     }
     const body: unknown = await res.json();

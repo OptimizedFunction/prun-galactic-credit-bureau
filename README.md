@@ -79,12 +79,10 @@ change, and running it again after `--apply` finds nothing left to do. A product
 
 ### FIO sync
 
-The sync runs hourly as a cron trigger. It reads each tracked lender's loan contracts from FIO using:
-
-- the lender's own FIO API key, if they connected one on the Track my loans page (stored encrypted with
-  `FIO_KEY_SECRET`). This is the intended route for every lender.
-- otherwise `FIO_API_KEY`, an account the lender granted contract permission to. This is a fallback for
-  lenders who have not switched over yet, and can be removed once they all have.
+The sync runs hourly as a cron trigger. It reads the loan contracts of every lender who connected their own
+FIO API key on the Track my loans page, each with their own key (stored encrypted with `FIO_KEY_SECRET`).
+There is no shared key and no FIO group to join: a lender who has not connected a key is not fetched, and
+their loans stay as they were last recorded until they connect.
 
 Set `FIO_KEY_SECRET` to any long random string in `.dev.vars`. Do not change it once keys are stored: they
 become unreadable and lenders have to connect again.

@@ -342,7 +342,7 @@ api.post('/fio-keys', async (c) => {
 
   await lenderKeys.connectLender(c.env.DB, name, await seal(apiKey, secret), user, { companyCode: profile?.companyCode });
   // Bring their loans in straight away instead of waiting for the hourly run.
-  c.executionCtx.waitUntil(runSync(c.env.DB, { bureauKey: c.env.FIO_API_KEY, keySecret: secret }).catch((err) => console.error('Sync after connecting a key failed', err)));
+  c.executionCtx.waitUntil(runSync(c.env.DB, { keySecret: secret }).catch((err) => console.error('Sync after connecting a key failed', err)));
 
   return json({ lender: { username: name, trackingMode: 'fio' }, contractsFound: fetched.contracts.length, loansFound }, 201);
 });

@@ -49,18 +49,17 @@ test('connecting a key switches a lender to automatic tracking and stores only c
   assert.ok(audit.every((a) => a.actor === 'ann' && !a.after_json.includes('key-')));
 });
 
-test('each lender is fetched with their own key, falling back to the bureau key', async () => {
-  const pick = async (keys: Parameters<typeof trackedLenders>[1]) => (await trackedLenders(db, keys)).map((l) => [l.username, l.key, l.ownKey]);
-  assert.deepEqual(await pick({ bureauKey: 'bureau', keySecret: SECRET }), [['Granted', 'bureau', false], ['HandEntered', 'key-hand', true], ['NewLender', 'key-new', true]]);
-  // No bureau key: only lenders who connected one can be fetched.
-  assert.deepEqual(await pick({ keySecret: SECRET }), [['Granted', null, false], ['HandEntered', 'key-hand', true], ['NewLender', 'key-new', true]]);
-  // Wrong secret (it was rotated): stored keys are unreadable, so the bureau key is used if there is one.
-  assert.deepEqual(await pick({ bureauKey: 'bureau', keySecret: 'rotated' }), [['Granted', 'bureau', false], ['HandEntered', 'bureau', false], ['NewLender', 'bureau', false]]);
+test('only lenders who connected a key are fetched, each with their own', async () => {
+  const pick = async (keys: Parameters<typeof trackedLenders>[1]) => (await trackedLenders(db, keys)).map((l) => [l.username, l.key]);
+  // "Granted" is marked as tracked but never connected a key, so it is not fetched: there is no shared key.
+  assert.deepEqual(await pick({ keySecret: SECRET }), [['HandEntered', 'key-hand'], ['NewLender', 'key-new']]);
+  // Wrong secret (it was rotated): stored keys are unreadable and each lender is told to connect again.
+  assert.deepEqual(await pick({ keySecret: 'rotated' }), [['HandEntered', null], ['NewLender', null]]);
   const unreadable = (await trackedLenders(db, { keySecret: 'rotated' })).find((l) => l.username === 'NewLender')!;
   assert.match(unreadable.problem!, /connecting again/);
 });
 
-test('the sync uses those keys and reports a rejected or missing key per lender', async () => {
+test('the sync uses those keys and reports a rejected key per lender', async () => {
   const used: [string, string][] = [];
   const summary = await runSync(
     db,
@@ -68,16 +67,15 @@ test('the sync uses those keys and reports a rejected or missing key per lender'
     {
       fetchLoans: async (key: string, lender: string): Promise<LoanFetchResult> => {
         used.push([lender, key]);
-        return lender === 'NewLender' ? { lender, httpStatus: 401, contracts: null, error: 'FIO permission not granted' } : { lender, httpStatus: 200, contracts: [], error: null };
+        return lender === 'NewLender' ? { lender, httpStatus: 401, contracts: null, error: 'FIO rejected the API key' } : { lender, httpStatus: 200, contracts: [], error: null };
       },
       fetchCompany: async () => null,
     },
   );
   assert.deepEqual(used.sort(), [['HandEntered', 'key-hand'], ['NewLender', 'key-new']]);
-  assert.equal(summary.lendersFailed, 2);
+  assert.equal(summary.lendersFailed, 1);
   const runs = (await db.prepare('SELECT le.username, s.http_status, s.error FROM sync_runs s JOIN lenders le ON le.id = s.lender_id ORDER BY le.username').all<Record<string, unknown>>()).results;
   assert.deepEqual(runs, [
-    { username: 'Granted', http_status: null, error: 'No FIO key is available for this lender' },
     { username: 'HandEntered', http_status: 200, error: null },
     { username: 'NewLender', http_status: 401, error: 'FIO rejected the API key this lender connected' },
   ]);
