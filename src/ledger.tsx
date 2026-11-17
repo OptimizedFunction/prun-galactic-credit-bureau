@@ -13,6 +13,8 @@ const LEDGER_CSS = `
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 12px 0; }
 .toolbar input[type=search] { flex: 1; min-width: 220px; padding: 8px 10px; font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
 .hint { color: var(--muted); font-size: 13px; margin: -8px 0 16px; }
+.phone-only { display: none; }
+@media (max-width: 760px) { .phone-only { display: block; margin: 0 0 12px; } .desk-only { display: none; } .ledger-scroll { max-height: none; } #ledger td { padding: 3px 12px; } }
 #ledger-msg { min-height: 1.5em; font-weight: 600; }
 #ledger-msg.ok { color: var(--good); } #ledger-msg.err { color: var(--bad); }
 #ledger th { position: sticky; top: 0; background: var(--panel); z-index: 1; padding: 0; }
@@ -91,7 +93,7 @@ ledgerPages.get('/ledger', async (c) => {
         <a href="/about">About</a>). Other people's changes appear within half a minute.
       </p>
       {user && (
-        <details class="panel">
+        <details class="panel desk-only">
           <summary>Add a loan</summary>
           <form class="add" id="ledger-add">
             <label>
@@ -152,13 +154,14 @@ ledgerPages.get('/ledger', async (c) => {
           </form>
         </details>
       )}
+      {user && <p class="hint phone-only">Editing is switched off on small screens, so a stray tap cannot change a loan. Use a wider screen to edit.</p>}
       <div class="toolbar">
         <input type="search" id="ledger-filter" placeholder="Filter: any text, e.g. a username, contract ID or status" aria-label="Filter loans" />
         <span id="ledger-count" class="muted"></span>
         <span id="ledger-msg" role="status"></span>
       </div>
       <div class="scroll ledger-scroll">
-        <table id="ledger">
+        <table id="ledger" class="stack">
           <thead>
             <tr></tr>
           </thead>

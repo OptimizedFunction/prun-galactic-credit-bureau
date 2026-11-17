@@ -2,7 +2,9 @@
 // Served at /ledger.js; the page embeds its data as JSON in #ledger-data.
 (() => {
   const boot = JSON.parse(document.getElementById('ledger-data').textContent);
-  const user = boot.user;
+  // On a small screen the ledger is read-only, so a stray tap cannot change a loan.
+  const small = window.matchMedia('(max-width: 760px)').matches;
+  const user = small ? null : boot.user;
   let loans = boot.loans;
   const byId = new Map(loans.map((l) => [l.id, l]));
 
@@ -109,6 +111,7 @@
     for (const col of COLS) {
       const td = document.createElement('td');
       td.dataset.f = col.f;
+      td.dataset.label = col.label;
       if (col.num) td.classList.add('num');
       if (col.wide) td.classList.add('wrap');
       if (col.check) {
