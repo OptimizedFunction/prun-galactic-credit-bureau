@@ -150,6 +150,8 @@ nav.contents a { padding: 4px 12px; font-size: 14px; background: var(--chip); bo
 .panel.about h2 { margin-top: 0; }
 .panel.about p:last-child, .panel.about ul:last-child { margin-bottom: 0; }
 .panel.about dt { scroll-margin-top: 76px; }
+:root[data-connected] .track-cta { display: none; }
+:root[data-connected] a.track-link { color: inherit; pointer-events: none; }
 .prompt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 16px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid #f2b84b; border-radius: 8px; }
 .prompt button { padding: 4px 10px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; }
 a.button { display: inline-block; padding: 9px 16px; color: #fff; background: #1558b0; border-radius: 6px; font-weight: 600; }
@@ -203,6 +205,15 @@ const AUTH_SCRIPT = `(function () {
     return n;
   }
   fetch('/auth/me').then(function (r) { return r.json(); }).then(function (d) {
+    // Someone who already tracks their loans is not asked to again: prompts go, and inline links become plain text.
+    var connected = Boolean(d.user && d.lenders && d.lenders.length);
+    try { if (connected) localStorage.setItem('connected', '1'); else localStorage.removeItem('connected'); } catch (e) {}
+    if (connected) {
+      document.documentElement.dataset.connected = '1';
+      document.querySelectorAll('a.track-link').forEach(function (a) { a.replaceWith(document.createTextNode(a.textContent.trim())); });
+    } else {
+      delete document.documentElement.dataset.connected;
+    }
     if (!d.user) {
       if (!d.signInAvailable) return;
       var a = node('a', 'signin', 'Sign in with Discord');
@@ -272,8 +283,8 @@ const AUTH_SCRIPT = `(function () {
   }).catch(function () {});
 })();`;
 
-/** Applies a saved theme choice before the first paint, so the page never flashes the wrong one. */
-const THEME_HEAD_SCRIPT = `try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}`;
+/** Applies a saved theme choice, and whether this user already tracks their loans, before the first paint so nothing flashes. */
+const THEME_HEAD_SCRIPT = `try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; if (localStorage.getItem('connected') === '1') document.documentElement.dataset.connected = '1'; } catch (e) {}`;
 
 /** The switch: flips between light and dark and remembers the choice on this device. */
 const THEME_SCRIPT = `(function () {
@@ -712,7 +723,11 @@ pages.get('/', async (c) => {
         <div class="panel">
           <strong>Lenders report</strong>
           <p class="muted">
-            Lenders <a href="/track">connect FIO</a> and their loan contracts are read every hour. Anything else can be added by hand in the{' '}
+            Lenders{' '}
+            <a class="track-link" href="/track">
+              connect FIO
+            </a>{' '}
+            and their loan contracts are read every hour. Anything else can be added by hand in the{' '}
             <a href="/ledger">ledger</a>.
           </p>
         </div>
@@ -915,7 +930,10 @@ pages.get('/lenders', async (c) => {
     <Layout title="Lenders" description="Everyone who lends in Prosperous Universe and reports to the bureau, with what each has out on loan.">
       <h1>Lenders</h1>
       <p class="sub">
-        Everyone who has lent, and what each has out on loan today. Lend yourself? <a href="/track">Track your loans automatically</a>.
+        Everyone who has lent, and what each has out on loan today.{' '}
+        <span class="track-cta">
+          Lend yourself? <a href="/track">Track your loans automatically</a>.
+        </span>
       </p>
       {tracked.length > 0 && (
         <p class={failing.length > 0 ? 'panel alert' : 'fresh'}>
@@ -955,7 +973,7 @@ pages.get('/lenders', async (c) => {
                 </td>
                 <td data-label="Updates">
                   {l.trackingMode !== 'fio' ? (
-                    <span class="muted">{l.trackingMode === 'api' ? 'Reported by the lender' : 'Entered by hand'}</span>
+                    <span class="muted">{l.trackingMode === 'api' ? 'Reported by the lender' : 'Manually entered'}</span>
                   ) : !l.sync ? (
                     <span class="muted">Automatic, first sync pending</span>
                   ) : l.sync.ok ? (
@@ -1028,7 +1046,7 @@ pages.get('/lenders/:username', async (c) => {
     all.nonCashLoans > 0 && `${plural(all.nonCashLoans, 'non-cash loan')} not counted in the amounts.`,
   ].filter(Boolean);
   const tracking =
-    lender.trackingMode === 'fio' ? 'loans tracked automatically through FIO' : lender.trackingMode === 'api' ? 'loans reported through the API' : 'loans entered by hand';
+    lender.trackingMode === 'fio' ? 'loans tracked automatically through FIO' : lender.trackingMode === 'api' ? 'loans reported through the API' : 'loans manually entered';
 
   return c.html(
     <Layout title={lender.username} description={`${lender.username} as a lender: ${headline} ${plural(all.loans, 'loan')} on record.`}>
@@ -1058,7 +1076,7 @@ pages.get('/lenders/:username', async (c) => {
           .
         </p>
       ) : (
-        <p class="fresh">These loans were entered by hand and are not checked against FIO.</p>
+        <p class="fresh">These loans were manually entered and are not checked against FIO.</p>
       )}
 
       <h2>Open or unresolved ({open.length})</h2>
@@ -1387,7 +1405,11 @@ pages.get('/about', (c) =>
       <section class="panel about" id="tracking">
         <h2>Automatic tracking</h2>
         <p>
-          Lenders can <a href="/track">connect their FIO account</a>. The bureau then reads their loan contracts every hour and keeps each loan's status
+          Lenders can{' '}
+          <a class="track-link" href="/track">
+            connect their FIO account
+          </a>
+          . The bureau then reads their loan contracts every hour and keeps each loan's status
           current without anyone typing it in. Only loans the lender paid out are recorded; loans they received are reported by their own lenders.
         </p>
         <p>
