@@ -61,6 +61,7 @@ header.site details.user summary::after { content: "▾"; color: #aebbd6; font-s
 header.site details.user summary:hover, header.site details.user[open] summary { background: rgba(255, 255, 255, .07); border-color: #3d5490; }
 header.site img.avatar { object-fit: cover; }
 header.site .avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #101a33; background: #f2b84b; font-size: 13px; font-weight: 700; text-transform: uppercase; }
+header.site .attn { width: 9px; height: 9px; margin-left: -14px; margin-top: -18px; background: #ff6b6b; border: 2px solid #14213f; border-radius: 50%; box-sizing: content-box; }
 header.site .uname { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 header.site .menu { position: absolute; right: 0; top: calc(100% - 6px); display: grid; min-width: 210px; padding: 6px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .3); }
 header.site .menu .who { padding: 6px 10px 8px; margin-bottom: 4px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); }
@@ -149,6 +150,12 @@ nav.contents a { padding: 4px 12px; font-size: 14px; background: var(--chip); bo
 .panel.about h2 { margin-top: 0; }
 .panel.about p:last-child, .panel.about ul:last-child { margin-bottom: 0; }
 .panel.about dt { scroll-margin-top: 76px; }
+.prompt { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 16px; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-left: 4px solid #f2b84b; border-radius: 8px; }
+.prompt button { padding: 4px 10px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; cursor: pointer; }
+a.button { display: inline-block; padding: 9px 16px; color: #fff; background: #1558b0; border-radius: 6px; font-weight: 600; }
+a.button:hover { text-decoration: none; background: #114a94; }
+section.mine + section.mine { margin-top: 40px; padding-top: 8px; border-top: 1px solid var(--line); }
+p.hint.spaced { margin: 12px 0 8px; }
 .titlebar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
 button.ghost { min-height: 34px; padding: 6px 14px; color: var(--link); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }
 button.ghost:hover { background: var(--chip); }
@@ -217,17 +224,51 @@ const AUTH_SCRIPT = `(function () {
       face.onerror = function () { face.replaceWith(initial); };
     }
     summary.append(face, node('span', 'uname', d.user.name));
+    var lenders = d.lenders || [];
+    var failing = lenders.filter(function (l) { return !l.ok; });
+    if (failing.length) {
+      var dot = node('span', 'attn');
+      dot.title = 'Your FIO key needs attention';
+      summary.append(dot);
+    }
     var panel = node('div', 'menu');
+    var mine = null;
+    if (lenders.length) {
+      mine = node('a', '', failing.length ? 'My lending (FIO key needs attention)' : 'My lending');
+      mine.href = '/my-lending';
+    }
     var track = node('a', '', 'Track my loans');
     track.href = '/track';
     var out = node('button', '', 'Sign out');
     out.type = 'button';
     out.onclick = function () { fetch('/auth/logout', { method: 'POST' }).then(function () { location.reload(); }); };
-    panel.append(node('div', 'who', 'Signed in with Discord'), track, out);
+    panel.append(node('div', 'who', 'Signed in with Discord'));
+    if (mine) panel.append(mine);
+    panel.append(track, out);
     menu.append(summary, panel);
     el.append(menu);
     document.addEventListener('click', function (e) { if (!menu.contains(e.target)) menu.open = false; });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') menu.open = false; });
+
+    // A lender who has signed in but not connected FIO gets one nudge on the Lookup page, until dismissed.
+    var dismissed = false;
+    try { dismissed = localStorage.getItem('trackPrompt') === 'off'; } catch (e) {}
+    var main = document.getElementById('main');
+    if (!lenders.length && !dismissed && location.pathname === '/' && main) {
+      var prompt = node('div', 'prompt');
+      var text = node('span', '', 'Do you lend? Connect FIO once and your loans stay up to date here without typing. ');
+      var go = node('a', '', 'Track my loans');
+      go.href = '/track';
+      text.append(go);
+      var close = node('button', '', 'Not now');
+      close.type = 'button';
+      close.onclick = function () {
+        try { localStorage.setItem('trackPrompt', 'off'); } catch (e) {}
+        prompt.remove();
+      };
+      prompt.append(text, close);
+      main.prepend(prompt);
+    }
   }).catch(function () {});
 })();`;
 
@@ -436,11 +477,11 @@ const Money = ({ minor, currency }: { minor: number; currency: string | null }) 
 );
 
 const day = (iso: string) => iso.slice(0, 10);
-const stamp = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
-const borrowerUrl = (name: string) => `/borrowers/${encodeURIComponent(name)}`;
-const lenderUrl = (name: string) => `/lenders/${encodeURIComponent(name)}`;
+export const stamp = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+export const borrowerUrl = (name: string) => `/borrowers/${encodeURIComponent(name)}`;
+export const lenderUrl = (name: string) => `/lenders/${encodeURIComponent(name)}`;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
 /** Search box with suggestions as you type. `hero` is the large one on the home page. */
 const SearchForm = ({ value, hero }: { value?: string; hero?: boolean }) => (
@@ -469,7 +510,7 @@ const SearchForm = ({ value, hero }: { value?: string; hero?: boolean }) => (
 type Tone = 'good' | 'warn' | 'bad' | 'neutral';
 
 /** The answer at the top of a page: one sentence, then the figures behind it. */
-const Verdict = ({ tone, headline, detail, children }: { tone: Tone; headline: string; detail?: Child; children?: Child }) => (
+export const Verdict = ({ tone, headline, detail, children }: { tone: Tone; headline: string; detail?: Child; children?: Child }) => (
   <section class={`verdict ${tone}`} aria-label="Summary">
     <p class="headline">{headline}</p>
     {detail && <p class="detail">{detail}</p>}
@@ -477,7 +518,7 @@ const Verdict = ({ tone, headline, detail, children }: { tone: Tone; headline: s
   </section>
 );
 
-const Stat = ({ label, value, note, children }: { label: string; value: Child; note?: Child; children?: Child }) => (
+export const Stat = ({ label, value, note, children }: { label: string; value: Child; note?: Child; children?: Child }) => (
   <div class="stat">
     <div class="label">{label}</div>
     <div class="big">{value}</div>
@@ -490,7 +531,7 @@ const Stat = ({ label, value, note, children }: { label: string; value: Child; n
  * A money figure: combined across currencies first, then each currency that contributes.
  * With a single currency there is nothing to combine, so it is shown as that currency's amount.
  */
-const MoneyStat = ({ label, combinedMinor, exposure, pick }: { label: string; combinedMinor: number; exposure: q.Exposure[]; pick: (e: q.Exposure) => number }) => {
+export const MoneyStat = ({ label, combinedMinor, exposure, pick }: { label: string; combinedMinor: number; exposure: q.Exposure[]; pick: (e: q.Exposure) => number }) => {
   const parts = exposure.filter((e) => e.currency !== null && pick(e) > 0);
   return (
     <Stat
@@ -538,7 +579,7 @@ const CopyLink = () => (
   </button>
 );
 
-const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrower' }) =>
+export const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrower' }) =>
   loans.length === 0 ? (
     <p class="muted">None.</p>
   ) : (
@@ -602,7 +643,7 @@ const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrow
   );
 
 /** Loans still running or left unresolved, as opposed to finished ones. */
-const isOpen = (l: q.Loan) => l.status !== 'complete' && l.status !== 'terminated';
+export const isOpen = (l: q.Loan) => l.status !== 'complete' && l.status !== 'terminated';
 
 const NotFound = ({ what, children }: { what: string; children?: Child }) => (
   <Layout title="Not found">

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { api } from './api';
 import { auth } from './auth';
 import { ledgerPages } from './ledger';
+import { mePages } from './me';
 import { trackPages } from './track';
 import { notFoundPage, pages } from './pages';
 import { runSync } from './sync/run';
@@ -13,6 +14,7 @@ app.route('/api/v1', api);
 app.route('/auth', auth);
 app.route('/', ledgerPages);
 app.route('/', trackPages);
+app.route('/', mePages);
 app.route('/', pages);
 
 app.notFound((c) => {

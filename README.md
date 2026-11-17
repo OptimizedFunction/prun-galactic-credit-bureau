@@ -22,6 +22,7 @@ It replaces the community "PRUN Credit Bureau Automated" Google Sheet with a web
 | Automatic sync from FIO | Done; run against live FIO locally |
 | Community editing (ledger page, Discord sign-in, change log with undo) | Done; sign-in itself not yet tried with a real Discord account |
 | Lenders connecting their own FIO key (Track my loans page) | Done |
+| My lending (a connected lender's own view, with key health) | Done |
 | Lender API keys and the report endpoint | Not started |
 | Deployment | Not started (runs locally only) |
 
@@ -114,6 +115,7 @@ src/pages.tsx    Server-rendered pages
 src/ledger.tsx   Editable ledger and Recent changes pages
 src/auth.ts      Discord sign-in and the signed session cookie
 src/track.tsx    Track my loans page (lenders connect a FIO key)
+src/me.tsx       My lending page
 assets/          Logo and the ledger's browser script
 src/db/          Database queries and edits
 src/sync/        FIO sync: client, decision rules, database writes
