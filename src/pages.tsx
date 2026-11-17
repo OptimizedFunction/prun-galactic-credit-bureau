@@ -9,17 +9,26 @@ import type { Env } from './env';
 
 export const pages = new Hono<{ Bindings: Env }>();
 
+const DARK_VARS = `
+  --bg: #0f1216; --panel: #171b21; --text: #e6e9ed; --muted: #98a2ae; --line: #2a3038; --link: #6cb0ff;
+  --good: #4cc26a; --warn: #e0a63a; --bad: #ff6b6b; --neutral: #9aa4af; --chip: #222830; color-scheme: dark;`;
+
+// The theme follows the device unless the visitor used the switch, which sets data-theme on <html>.
 const CSS = `
 :root {
   --bg: #f6f7f9; --panel: #fff; --text: #1b1f24; --muted: #5f6b7a; --line: #dfe3e8; --link: #1558b0;
-  --good: #1a7f37; --warn: #9a6700; --bad: #c62828; --neutral: #57606a; --chip: #eef1f4;
+  --good: #1a7f37; --warn: #9a6700; --bad: #c62828; --neutral: #57606a; --chip: #eef1f4; color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1216; --panel: #171b21; --text: #e6e9ed; --muted: #98a2ae; --line: #2a3038; --link: #6cb0ff;
-    --good: #4cc26a; --warn: #e0a63a; --bad: #ff6b6b; --neutral: #9aa4af; --chip: #222830;
+  :root:not([data-theme=light]) {${DARK_VARS}
   }
 }
+:root[data-theme=dark] {${DARK_VARS}
+}
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 50; padding: 8px 14px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.skip:focus { left: 8px; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--link); text-decoration: none; }
@@ -28,7 +37,7 @@ header.site .inner, main, footer { max-width: 1100px; margin: 0 auto; padding: 0
 
 /* Top bar: the logo's navy and gold in both light and dark themes. */
 header.site { position: sticky; top: 0; z-index: 20; color: #dfe6f5; background: linear-gradient(180deg, #14213f, #0d1730); border-bottom: 1px solid #263760; box-shadow: 0 1px 10px rgba(0, 0, 0, .28); }
-header.site .inner { display: flex; align-items: stretch; gap: 0 28px; max-width: 1280px; min-height: 58px; }
+header.site .inner { display: flex; align-items: stretch; gap: 0 20px; max-width: 1280px; min-height: 58px; }
 header.site a:hover { text-decoration: none; }
 header.site .brand { display: flex; align-items: center; gap: 11px; color: #fff; white-space: nowrap; }
 header.site .brand img { filter: drop-shadow(0 0 6px rgba(242, 184, 75, .35)); }
@@ -38,6 +47,10 @@ header.site nav { display: flex; align-items: stretch; gap: 2px; flex: 1; min-wi
 header.site nav a { display: flex; align-items: center; padding: 0 12px; color: #aebbd6; font-size: 14px; font-weight: 500; white-space: nowrap; border-bottom: 2px solid transparent; border-top: 2px solid transparent; transition: color .15s, border-color .15s, background-color .15s; }
 header.site nav a:hover { color: #fff; background: rgba(255, 255, 255, .05); }
 header.site nav a[aria-current] { color: #fff; border-bottom-color: #f2b84b; }
+header.site .theme { display: grid; place-items: center; align-self: center; flex: none; width: 34px; height: 34px; padding: 0; color: #dfe6f5; background: none; border: 1px solid #2c3f6e; border-radius: 50%; cursor: pointer; }
+header.site .theme:hover { background: rgba(255, 255, 255, .07); border-color: #3d5490; }
+header.site .theme .sun, header.site .theme[data-mode=dark] .moon { display: none; }
+header.site .theme[data-mode=dark] .sun { display: block; }
 header.site .auth { position: relative; display: flex; align-items: center; min-width: 96px; justify-content: flex-end; }
 header.site .signin { padding: 7px 14px; border-radius: 8px; color: #fff; background: #5865f2; font-size: 14px; font-weight: 600; white-space: nowrap; }
 header.site .signin:hover { background: #4752c4; }
@@ -55,6 +68,7 @@ header.site .menu a:hover, header.site .menu button:hover { background: var(--ch
 @media (max-width: 860px) {
   header.site .inner { flex-wrap: wrap; padding-top: 8px; }
   header.site .brand { flex: 1; }
+  header.site .theme { margin-right: 12px; }
   header.site nav { order: 3; flex-basis: 100%; height: 42px; margin: 6px -16px 0; padding: 0 8px; border-top: 1px solid #263760; }
 }
 main { padding-top: 24px; padding-bottom: 40px; }
@@ -93,6 +107,47 @@ dl.facts dt { color: var(--muted); }
 dl.facts dd { margin: 0; overflow-wrap: anywhere; }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+
+/* Verdict banner: the answer, then the figures behind it. */
+.verdict { margin: 0 0 12px; padding: 16px 18px; background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--neutral); border-radius: 10px; }
+.verdict.good { border-left-color: var(--good); } .verdict.warn { border-left-color: var(--warn); } .verdict.bad { border-left-color: var(--bad); }
+.verdict .headline { margin: 0; font-size: 19px; font-weight: 650; line-height: 1.35; }
+.verdict .detail { margin: 4px 0 0; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px 28px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.stats.first { margin-top: 0; padding-top: 0; border-top: 0; }
+.stat .label { color: var(--muted); font-size: 13px; }
+.stat .big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stat .unit { color: var(--muted); font-size: 13px; font-weight: 600; }
+.stat .note { color: var(--muted); font-size: 12px; }
+.stat ul.parts { margin: 4px 0 0; padding: 0; list-style: none; font-size: 13px; font-variant-numeric: tabular-nums; }
+.stat ul.parts span { display: inline-block; width: 36px; color: var(--muted); }
+.stat ul.names { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.fresh { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+.titlebar { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; }
+button.ghost { min-height: 34px; padding: 6px 14px; color: var(--link); background: none; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 14px; cursor: pointer; }
+button.ghost:hover { background: var(--chip); }
+.hero-block { padding: 20px 0 4px; text-align: center; }
+.hero-block h1 { font-size: 30px; }
+form.search.hero { max-width: 720px; margin: 20px auto 8px; }
+form.search.hero input { padding: 14px 16px; font-size: 17px; }
+form.search.hero button { padding: 14px 24px; font-size: 16px; }
+.cols.three { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.cols.three p { margin: 6px 0 0; }
+ul.next { margin: 8px 0 0; padding-left: 20px; }
+th a { color: inherit; } th [aria-current] { color: var(--text); }
+
+/* Phones: tables marked "stack" become one card per row, with the column name beside each value. */
+@media (max-width: 640px) {
+  h1 { font-size: 23px; } .hero-block h1 { font-size: 24px; }
+  form.search { flex-wrap: wrap; } form.search button { flex: 1; }
+  table.stack thead { position: absolute; left: -9999px; }
+  table.stack tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  table.stack tr:last-child { border-bottom: 0; }
+  table.stack td { display: flex; justify-content: space-between; gap: 16px; padding: 3px 12px; border: 0; white-space: normal; text-align: right; }
+  table.stack td::before { content: attr(data-label); flex: none; color: var(--muted); text-align: left; }
+  table.stack td:empty { display: none; }
+  table.stack td.wrap { min-width: 0; }
+}
 `;
 
 /** Marks the tab for the current page. Runs right after the nav is parsed, so there is no flicker. */
@@ -150,16 +205,97 @@ const AUTH_SCRIPT = `(function () {
   }).catch(function () {});
 })();`;
 
-export const Layout = (props: { title: string; wide?: boolean; children?: Child }) => html`<!doctype html>${(
+/** Applies a saved theme choice before the first paint, so the page never flashes the wrong one. */
+const THEME_HEAD_SCRIPT = `try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}`;
+
+/** The switch: flips between light and dark and remembers the choice on this device. */
+const THEME_SCRIPT = `(function () {
+  var b = document.getElementById('theme'), root = document.documentElement, mq = matchMedia('(prefers-color-scheme: dark)');
+  function mode() { return root.dataset.theme || (mq.matches ? 'dark' : 'light'); }
+  function paint() {
+    var m = mode(), label = 'Switch to ' + (m === 'dark' ? 'light' : 'dark') + ' theme';
+    b.dataset.mode = m; b.title = label; b.setAttribute('aria-label', label);
+  }
+  b.onclick = function () {
+    var next = mode() === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next;
+    try { localStorage.setItem('theme', next); } catch (e) {}
+    paint();
+  };
+  mq.addEventListener('change', paint);
+  paint();
+})();`;
+
+/** Search suggestions while typing, from the public search API. */
+const SUGGEST_SCRIPT = `(function () {
+  var input = document.getElementById('q'), list = document.getElementById('q-suggest'), timer, last = '';
+  if (!input || !list) return;
+  input.addEventListener('input', function () {
+    clearTimeout(timer);
+    var v = input.value.trim();
+    if (v.length < 2 || v === last) return;
+    timer = setTimeout(function () {
+      last = v;
+      fetch('/api/v1/search?q=' + encodeURIComponent(v)).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (!d) return;
+        var seen = {};
+        list.textContent = '';
+        d.borrowers.concat(d.lenders).forEach(function (x) {
+          var key = x.username.toLowerCase();
+          if (seen[key] || list.children.length >= 12) return;
+          seen[key] = 1;
+          var o = document.createElement('option');
+          o.value = x.username;
+          if (x.companyCode) o.label = x.username + ' (' + x.companyCode + ')';
+          list.append(o);
+        });
+      }).catch(function () {});
+    }, 160);
+  });
+})();`;
+
+/** Small page behaviours: copy-link buttons, and times shown as "12 minutes ago". */
+const PAGE_SCRIPT = `(function () {
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-copy]');
+    if (!b || !navigator.clipboard) return;
+    navigator.clipboard.writeText(location.href).then(function () {
+      var was = b.textContent;
+      b.textContent = 'Link copied';
+      setTimeout(function () { b.textContent = was; }, 1800);
+    });
+  });
+  document.querySelectorAll('time[data-rel]').forEach(function (t) {
+    var s = (Date.now() - Date.parse(t.dateTime)) / 1000;
+    if (isNaN(s) || s < 0) return;
+    t.title = t.textContent;
+    t.textContent = s < 90 ? 'just now' : s < 5400 ? Math.round(s / 60) + ' minutes ago' : s < 172800 ? Math.round(s / 3600) + ' hours ago' : Math.round(s / 86400) + ' days ago';
+  });
+})();`;
+
+const SITE_DESCRIPTION = 'A public record of lending between Prosperous Universe players.';
+
+export const Layout = (props: { title: string; description?: string; wide?: boolean; children?: Child }) => html`<!doctype html>${(
   <html lang="en">
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>{props.title} · PrUn Galactic Credit Bureau</title>
+      <meta name="description" content={props.description ?? SITE_DESCRIPTION} />
+      {/* Link previews (Discord and others). */}
+      <meta property="og:site_name" content="PrUn Galactic Credit Bureau" />
+      <meta property="og:title" content={props.title} />
+      <meta property="og:description" content={props.description ?? SITE_DESCRIPTION} />
+      <meta property="og:type" content="website" />
+      <meta name="theme-color" content="#f2b84b" />
       <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+      <script dangerouslySetInnerHTML={{ __html: THEME_HEAD_SCRIPT }} />
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
     </head>
     <body>
+      <a class="skip" href="#main">
+        Skip to content
+      </a>
       <header class="site">
         <div class="inner">
           <a class="brand" href="/" aria-label="PrUn Galactic Credit Bureau, home">
@@ -179,12 +315,28 @@ export const Layout = (props: { title: string; wide?: boolean; children?: Child 
             <a href="/about">About</a>
           </nav>
           <script dangerouslySetInnerHTML={{ __html: NAV_SCRIPT }} />
+          <button type="button" id="theme" class="theme">
+            <svg class="moon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+            </svg>
+            <svg class="sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" fill="currentColor" />
+              <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+          </button>
+          <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
           <div id="auth" class="auth"></div>
         </div>
       </header>
-      <main class={props.wide ? 'wide' : undefined}>{props.children}</main>
-      <footer>A public record of lending in Prosperous Universe. Amounts are in-game currency, kept separate per currency except on the combined leaderboard.</footer>
+      <main id="main" class={props.wide ? 'wide' : undefined}>
+        {props.children}
+      </main>
+      <footer>
+        A public record of lending in Prosperous Universe. Amounts are in-game currency. Combined figures add the four currencies at face value, with no
+        exchange rate applied.
+      </footer>
       <script dangerouslySetInnerHTML={{ __html: AUTH_SCRIPT }} />
+      <script dangerouslySetInnerHTML={{ __html: PAGE_SCRIPT }} />
     </body>
   </html>
 )}`;
@@ -217,55 +369,111 @@ const stamp = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 const borrowerUrl = (name: string) => `/borrowers/${encodeURIComponent(name)}`;
 const lenderUrl = (name: string) => `/lenders/${encodeURIComponent(name)}`;
 
-const SearchForm = ({ value }: { value?: string }) => (
-  <form class="search" action="/search" method="get">
-    <input type="search" name="q" value={value ?? ''} placeholder="Borrower or lender username, or company code" aria-label="Search" required minlength={2} />
-    <button type="submit">Search</button>
-  </form>
+const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+/** Search box with suggestions as you type. `hero` is the large one on the home page. */
+const SearchForm = ({ value, hero }: { value?: string; hero?: boolean }) => (
+  <>
+    <form class={hero ? 'search hero' : 'search'} action="/search" method="get" role="search">
+      <input
+        type="search"
+        id="q"
+        name="q"
+        list="q-suggest"
+        value={value ?? ''}
+        placeholder="Borrower or lender username, or company code"
+        aria-label="Search for a borrower or lender"
+        required
+        minlength={2}
+        autocomplete="off"
+        autofocus={hero}
+      />
+      <datalist id="q-suggest"></datalist>
+      <button type="submit">Search</button>
+    </form>
+    <script dangerouslySetInnerHTML={{ __html: SUGGEST_SCRIPT }} />
+  </>
 );
 
-const ExposureCards = ({ exposure, role }: { exposure: q.Exposure[]; role: 'borrowed' | 'lent' }) => (
-  <div class="cards">
-    {exposure.map((e) => (
-      <div class="card">
-        <div class="cur">{e.currency ?? 'NON-CASH'}</div>
-        <div class="big">{formatMinor(e.currentMinor)}</div>
-        <div class="muted">currently {role === 'borrowed' ? 'owed' : 'out on loan'}</div>
-        <dl>
-          <dt>Total {role}</dt>
-          <dd>{formatMinor(e.totalMinor)}</dd>
-          <dt>Loans</dt>
-          <dd>{e.loans}</dd>
-          <dt>Breached now</dt>
-          <dd>{e.breachedLoans}</dd>
-          <dt>Ever breached</dt>
-          <dd>{e.everBreachedLoans}</dd>
-          <dt>Overdue</dt>
-          <dd>{e.overdueLoans}</dd>
-          {e.staleMinor > 0 && (
-            <>
-              <dt>Stale (outcome unknown)</dt>
-              <dd>{formatMinor(e.staleMinor)}</dd>
-            </>
-          )}
-          {e.terminatedLoans > 0 && (
-            <>
-              <dt>Terminated (not in total)</dt>
-              <dd>{e.terminatedLoans}</dd>
-            </>
-          )}
-        </dl>
-      </div>
-    ))}
+type Tone = 'good' | 'warn' | 'bad' | 'neutral';
+
+/** The answer at the top of a page: one sentence, then the figures behind it. */
+const Verdict = ({ tone, headline, detail, children }: { tone: Tone; headline: string; detail?: Child; children?: Child }) => (
+  <section class={`verdict ${tone}`} aria-label="Summary">
+    <p class="headline">{headline}</p>
+    {detail && <p class="detail">{detail}</p>}
+    <div class="stats">{children}</div>
+  </section>
+);
+
+const Stat = ({ label, value, note, children }: { label: string; value: Child; note?: Child; children?: Child }) => (
+  <div class="stat">
+    <div class="label">{label}</div>
+    <div class="big">{value}</div>
+    {note && <div class="note">{note}</div>}
+    {children}
   </div>
+);
+
+/**
+ * A money figure: combined across currencies first, then each currency that contributes.
+ * With a single currency there is nothing to combine, so it is shown as that currency's amount.
+ */
+const MoneyStat = ({ label, combinedMinor, exposure, pick }: { label: string; combinedMinor: number; exposure: q.Exposure[]; pick: (e: q.Exposure) => number }) => {
+  const parts = exposure.filter((e) => e.currency !== null && pick(e) > 0);
+  return (
+    <Stat
+      label={label}
+      value={
+        <>
+          {formatMinor(combinedMinor)}
+          {parts.length === 1 && <span class="unit"> {parts[0]!.currency}</span>}
+        </>
+      }
+      note={parts.length > 1 ? 'all currencies, at face value' : undefined}
+    >
+      {parts.length > 1 && (
+        <ul class="parts">
+          {parts.map((e) => (
+            <li>
+              <span>{e.currency}</span>
+              {formatMinor(pick(e))}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Stat>
+  );
+};
+
+/** When the automatically tracked data was last checked against FIO. */
+const Freshness = ({ health }: { health: q.SyncHealth[] }) => {
+  if (health.length === 0) return null;
+  const last = health.reduce((latest, h) => (h.checkedAt > latest ? h.checkedAt : latest), '');
+  const current = health.filter((h) => h.ok).length;
+  return (
+    <p class="fresh">
+      Tracked loans last checked against FIO{' '}
+      <time datetime={last} data-rel>
+        {stamp(last)}
+      </time>
+      ; {current} of {plural(health.length, 'tracked lender')} current. <a href="/sync">Sync health</a>
+    </p>
+  );
+};
+
+const CopyLink = () => (
+  <button type="button" class="ghost" data-copy>
+    Copy link
+  </button>
 );
 
 const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrower' }) =>
   loans.length === 0 ? (
-    <p class="muted">No loans.</p>
+    <p class="muted">None.</p>
   ) : (
     <div class="scroll">
-      <table>
+      <table class="stack">
         <thead>
           <tr>
             <th>Issued</th>
@@ -282,30 +490,40 @@ const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrow
         <tbody>
           {loans.map((l) => (
             <tr>
-              <td>
+              <td data-label="Issued">
                 <a href={`/loans/${l.id}`}>{l.issuedOn}</a>
               </td>
               {hide !== 'lender' && (
-                <td>
+                <td data-label="Lender">
                   <a href={lenderUrl(l.lender)}>{l.lender}</a>
                 </td>
               )}
               {hide !== 'borrower' && (
-                <td>
+                <td data-label="Borrower">
                   <a href={borrowerUrl(l.borrower.username)}>{l.borrower.username}</a>
                 </td>
               )}
-              <td class="num">
-                <Money minor={l.principalMinor} currency={l.currency} />
+              <td class="num" data-label="Amount">
+                <span>
+                  <Money minor={l.principalMinor} currency={l.currency} />
+                </span>
               </td>
-              <td class="num">{l.durationWeeks === null ? '–' : Number(l.durationWeeks.toFixed(1))}</td>
-              <td>
-                <StatusBadge status={l.status} />
-                {l.everBreached && l.status !== 'breached' && <span class="badge bad" style="margin-left:4px">was breached</span>}
+              <td class="num" data-label="Weeks">
+                {l.durationWeeks === null ? '–' : Number(l.durationWeeks.toFixed(1))}
               </td>
-              <td>{l.contractId ?? <span class="muted">–</span>}</td>
-              <td class="muted">{TRUST_LABELS[l.trust]}</td>
-              <td class="wrap">{l.notes ?? ''}</td>
+              <td data-label="Status">
+                <span>
+                  <StatusBadge status={l.status} />
+                  {l.everBreached && l.status !== 'breached' && <span class="badge bad" style="margin-left:4px">was breached</span>}
+                </span>
+              </td>
+              <td data-label="Contract">{l.contractId ?? <span class="muted">–</span>}</td>
+              <td class="muted" data-label="Trust">
+                {TRUST_LABELS[l.trust]}
+              </td>
+              <td class="wrap" data-label="Notes">
+                {l.notes ?? ''}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -313,28 +531,89 @@ const LoanTable = ({ loans, hide }: { loans: q.Loan[]; hide?: 'lender' | 'borrow
     </div>
   );
 
-const NotFound = ({ what }: { what: string }) => (
+/** Loans still running or left unresolved, as opposed to finished ones. */
+const isOpen = (l: q.Loan) => l.status !== 'complete' && l.status !== 'terminated';
+
+const NotFound = ({ what, children }: { what: string; children?: Child }) => (
   <Layout title="Not found">
     <h1>Not found</h1>
     <p class="sub">{what}</p>
     <SearchForm />
+    {children}
   </Layout>
+);
+
+/** "No record" must not read as "clean record". */
+const NoRecord = ({ name }: { name: string }) => (
+  <div class="panel">
+    <p>
+      <strong>No lender has reported a loan to “{name}”.</strong> That is not the same as a clean history: lenders report to the bureau by choice, and
+      loans made outside it do not appear.
+    </p>
+    <ul class="next">
+      <li>Check the spelling, or search by part of the name.</li>
+      <li>Try the player's company code instead.</li>
+      <li>
+        See <a href="/lenders">which lenders report</a> to judge how much of the market the bureau covers.
+      </li>
+    </ul>
+  </div>
 );
 
 pages.get('/logo.svg', (c) => c.body(logoSvg, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' }));
 
 pages.get('/', async (c) => {
-  const totals = await q.getTotals(c.env.DB);
+  const [totals, health, { loans: breached }] = await Promise.all([
+    q.getTotals(c.env.DB),
+    q.getSyncHealth(c.env.DB),
+    q.listLoans(c.env.DB, { status: 'breached', limit: 5, offset: 0 }),
+  ]);
+  const all = q.combine(totals.exposure);
   return c.html(
-    <Layout title="Borrower lookup">
-      <h1>PrUn Galactic Credit Bureau</h1>
-      <p class="sub">
-        Know what a borrower owes, and to whom, before you lend. On record: {totals.loans.toLocaleString('en-US')} loans from {totals.lenders} lenders
-        to {totals.borrowers} borrowers.
-      </p>
-      <SearchForm />
-      <h2>All recorded lending</h2>
-      <ExposureCards exposure={totals.exposure} role="lent" />
+    <Layout title="Borrower lookup" description="Check what a Prosperous Universe player already owes, and to whom, before you lend.">
+      <div class="hero-block">
+        <h1>Check a borrower before you lend</h1>
+        <p class="sub">See what a player already owes, to whom, and how their past loans ended.</p>
+        <SearchForm hero />
+      </div>
+
+      <h2>On record</h2>
+      <section class="verdict neutral" aria-label="Bureau totals">
+        <div class="stats first">
+          <MoneyStat label="Out on loan now" combinedMinor={all.currentMinor} exposure={totals.exposure} pick={(e) => e.currentMinor} />
+          <MoneyStat label="Lent, all time" combinedMinor={all.totalMinor} exposure={totals.exposure} pick={(e) => e.totalMinor} />
+          <Stat label="Loans" value={totals.loans.toLocaleString('en-US')} note={`${plural(totals.lenders, 'lender')} · ${plural(totals.borrowers, 'borrower')}`} />
+        </div>
+      </section>
+      <Freshness health={health} />
+
+      {breached.length > 0 && (
+        <>
+          <h2>Latest loans in breach</h2>
+          <LoanTable loans={breached} />
+        </>
+      )}
+
+      <h2>How it works</h2>
+      <div class="cols three">
+        <div class="panel">
+          <strong>Lenders report</strong>
+          <p class="muted">
+            Lenders <a href="/track">connect FIO</a> and their loan contracts are read every hour. Anything else can be added by hand in the{' '}
+            <a href="/ledger">ledger</a>.
+          </p>
+        </div>
+        <div class="panel">
+          <strong>Everyone can check</strong>
+          <p class="muted">Every loan, status and change is public. No account is needed to look someone up.</p>
+        </div>
+        <div class="panel">
+          <strong>The record stays honest</strong>
+          <p class="muted">
+            Each loan shows where it came from, and every edit is listed in <a href="/changes">Recent changes</a> with an undo.
+          </p>
+        </div>
+      </div>
     </Layout>,
   );
 });
@@ -354,7 +633,7 @@ pages.get('/search', async (c) => {
       <SearchForm value={term} />
       <h2>Borrowers</h2>
       {results.borrowers.length === 0 ? (
-        <p class="muted">No borrower matches “{term}”. That means no lender has reported a loan to them, not that they have never borrowed.</p>
+        <NoRecord name={term} />
       ) : (
         <div class="scroll">
           <table>
@@ -411,68 +690,124 @@ pages.get('/search', async (c) => {
 });
 
 pages.get('/borrowers/:username', async (c) => {
-  const borrower = await q.getBorrower(c.env.DB, c.req.param('username'));
+  const asked = c.req.param('username');
+  const borrower = await q.getBorrower(c.env.DB, asked);
   if (!borrower) {
     c.status(404);
-    return c.html(<NotFound what="No lender has reported a loan to this borrower." />);
+    return c.html(
+      <NotFound what="There is no borrower record under this name.">
+        <NoRecord name={asked} />
+      </NotFound>,
+    );
   }
-  const [exposure, { loans }] = await Promise.all([
+  const [exposure, { loans }, health] = await Promise.all([
     q.getBorrowerExposure(c.env.DB, borrower.id),
     q.listLoans(c.env.DB, { borrower: borrower.username, limit: 500, offset: 0 }),
+    q.getSyncHealth(c.env.DB),
   ]);
-  const breachedNow = exposure.reduce((n, e) => n + e.breachedLoans, 0);
-  const everBreached = exposure.reduce((n, e) => n + e.everBreachedLoans, 0);
-  const lenders = new Set(loans.filter((l) => l.status === 'in_progress' || l.status === 'overdue').map((l) => l.lender));
+  const all = q.combine(exposure);
+  const open = loans.filter(isOpen);
+  const closed = loans.filter((l) => !isOpen(l));
+  const owedTo = [...new Set(loans.filter((l) => l.status === 'in_progress' || l.status === 'overdue').map((l) => l.lender))];
+  const owedIn = exposure.filter((e) => e.currency !== null && e.currentMinor > 0);
+
+  // The verdict: what is owed, then the breach record.
+  const debt =
+    all.currentMinor > 0
+      ? `Owes ${formatMinor(all.currentMinor)}${owedIn.length === 1 ? ` ${owedIn[0]!.currency}` : ''} to ${plural(owedTo.length, 'lender')}`
+      : 'Owes nothing at the moment';
+  const record =
+    all.breachedLoans > 0
+      ? `${plural(all.breachedLoans, 'loan')} in breach`
+      : all.everBreachedLoans > 0
+        ? `no breach now, but ${plural(all.everBreachedLoans, 'loan')} breached in the past`
+        : 'no breaches on record';
+  const headline = `${debt}; ${record}.`;
+  const tone: Tone =
+    all.breachedLoans > 0 ? 'bad' : all.overdueLoans > 0 || all.everBreachedLoans > 0 || all.staleMinor > 0 ? 'warn' : all.currentMinor > 0 ? 'neutral' : 'good';
+  const caveats = [
+    all.overdueLoans > 0 && `${plural(all.overdueLoans, 'loan')} overdue.`,
+    all.staleMinor > 0 && `${formatMinor(all.staleMinor)} in loans whose outcome is unknown.`,
+    all.nonCashLoans > 0 && `${plural(all.nonCashLoans, 'non-cash loan')} not counted in the amounts.`,
+  ].filter(Boolean);
 
   return c.html(
-    <Layout title={borrower.username}>
-      <h1>{borrower.username}</h1>
-      <p class="sub">
-        Borrower · company {borrower.companyCode ?? 'unknown'} · corp {borrower.corpCode ?? 'none'}
-        {borrower.aliases.length > 0 && <> · formerly {borrower.aliases.join(', ')}</>}
-        {' · '}
-        <a href={lenderUrl(borrower.username)}>lender page</a>
-      </p>
-      {everBreached > 0 && (
-        <p class="panel alert">
-          <strong>
-            {breachedNow > 0
-              ? `${breachedNow} loan${breachedNow === 1 ? ' is' : 's are'} in breach.`
-              : 'No loan is in breach now.'}
-          </strong>{' '}
-          {everBreached} loan{everBreached === 1 ? ' has' : 's have'} been breached at some point.
-        </p>
-      )}
-      <p>
-        Currently owes {lenders.size} lender{lenders.size === 1 ? '' : 's'}
-        {lenders.size > 0 && <>: {[...lenders].join(', ')}</>}.
-      </p>
-      <ExposureCards exposure={exposure} role="borrowed" />
-      <h2>Loans ({loans.length})</h2>
-      <LoanTable loans={loans} hide="borrower" />
+    <Layout title={borrower.username} description={`${borrower.username}: ${headline} ${plural(all.loans, 'loan')} on record.`}>
+      <div class="titlebar">
+        <div>
+          <h1>{borrower.username}</h1>
+          <p class="sub">
+            Borrower · company {borrower.companyCode ?? 'unknown'} · corp {borrower.corpCode ?? 'none'}
+            {borrower.aliases.length > 0 && <> · formerly {borrower.aliases.join(', ')}</>}
+            {' · '}
+            <a href={lenderUrl(borrower.username)}>as a lender</a>
+          </p>
+        </div>
+        <CopyLink />
+      </div>
+
+      <Verdict tone={tone} headline={headline} detail={caveats.length > 0 ? caveats.join(' ') : undefined}>
+        <MoneyStat label="Owed now" combinedMinor={all.currentMinor} exposure={exposure} pick={(e) => e.currentMinor} />
+        <MoneyStat label="Borrowed in total" combinedMinor={all.totalMinor} exposure={exposure} pick={(e) => e.totalMinor} />
+        <Stat label="Owed to" value={owedTo.length}>
+          {owedTo.length > 0 && (
+            <ul class="parts names">
+              {owedTo.map((name) => (
+                <li>
+                  <a href={lenderUrl(name)}>{name}</a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Stat>
+        <Stat label="In breach" value={all.breachedLoans} note={`${all.everBreachedLoans} ever · ${all.overdueLoans} overdue`} />
+        <Stat label="Loans" value={all.loans + all.nonCashLoans} note={`${open.length} open · ${closed.length} closed`} />
+      </Verdict>
+      <Freshness health={health} />
+
+      <h2>Open or unresolved ({open.length})</h2>
+      {open.length === 0 ? <p class="muted">Nothing open. Every recorded loan is complete or was terminated.</p> : <LoanTable loans={open} hide="borrower" />}
+      <h2>Closed ({closed.length})</h2>
+      {closed.length === 0 ? <p class="muted">No finished loans yet.</p> : <LoanTable loans={closed} hide="borrower" />}
     </Layout>,
   );
 });
 
 pages.get('/lenders', async (c) => {
-  const lenders = (await q.listLenders(c.env.DB)).sort((a, b) => b.loans - a.loans || a.username.localeCompare(b.username));
+  const sort = c.req.query('sort') === 'loans' ? 'loans' : c.req.query('sort') === 'name' ? 'name' : 'out';
+  const lenders = (await q.listLenders(c.env.DB)).map((l) => ({ ...l, all: q.combine(l.exposure) }));
+  lenders.sort((a, b) =>
+    sort === 'name'
+      ? a.username.localeCompare(b.username)
+      : (sort === 'loans' ? b.loans - a.loans : b.all.currentMinor - a.all.currentMinor) || b.all.totalMinor - a.all.totalMinor || a.username.localeCompare(b.username),
+  );
   const cell = (l: q.LenderSummary, currency: string) => {
     const e = l.exposure.find((x) => x.currency === currency);
     return e && e.currentMinor > 0 ? formatMinor(e.currentMinor) : '';
   };
+  const head = (key: string, label: string) =>
+    sort === key ? (
+      <span aria-current="true">{label} ▼</span>
+    ) : (
+      <a href={`/lenders?sort=${key}`} title={`Sort by ${label.toLowerCase()}`}>
+        {label}
+      </a>
+    );
   return c.html(
-    <Layout title="Lenders">
+    <Layout title="Lenders" description="Everyone who lends in Prosperous Universe and reports to the bureau, with what each has out on loan.">
       <h1>Lenders</h1>
       <p class="sub">
-        Everyone who has lent, and what each has out on loan today in each currency. Lend yourself? <a href="/track">Track your loans automatically</a>.
+        Everyone who has lent, and what each has out on loan today. Lend yourself? <a href="/track">Track your loans automatically</a>.
       </p>
+      <p class="hint">“Out now” adds the four currencies at face value, with no exchange rate applied. The currency columns hold the exact amounts.</p>
       <div class="scroll">
-        <table>
+        <table class="stack">
           <thead>
             <tr>
-              <th>Lender</th>
+              <th>{head('name', 'Lender')}</th>
               <th>Tracking</th>
-              <th class="num">Loans</th>
+              <th class="num">{head('loans', 'Loans')}</th>
+              <th class="num">{head('out', 'Out now')}</th>
               <th class="num">AIC</th>
               <th class="num">CIS</th>
               <th class="num">ICA</th>
@@ -482,15 +817,30 @@ pages.get('/lenders', async (c) => {
           <tbody>
             {lenders.map((l) => (
               <tr>
-                <td>
+                <td data-label="Lender">
                   <a href={lenderUrl(l.username)}>{l.username}</a>
                 </td>
-                <td class="muted">{l.trackingMode === 'fio' ? 'Automatic (FIO)' : l.trackingMode === 'api' ? 'Reported (API)' : 'Manual'}</td>
-                <td class="num">{l.loans}</td>
-                <td class="num">{cell(l, 'AIC')}</td>
-                <td class="num">{cell(l, 'CIS')}</td>
-                <td class="num">{cell(l, 'ICA')}</td>
-                <td class="num">{cell(l, 'NCC')}</td>
+                <td class="muted" data-label="Tracking">
+                  {l.trackingMode === 'fio' ? 'Automatic (FIO)' : l.trackingMode === 'api' ? 'Reported (API)' : 'Manual'}
+                </td>
+                <td class="num" data-label="Loans">
+                  {l.loans}
+                </td>
+                <td class="num" data-label="Out now">
+                  {l.all.currentMinor > 0 ? <strong>{formatMinor(l.all.currentMinor)}</strong> : ''}
+                </td>
+                <td class="num" data-label="AIC">
+                  {cell(l, 'AIC')}
+                </td>
+                <td class="num" data-label="CIS">
+                  {cell(l, 'CIS')}
+                </td>
+                <td class="num" data-label="ICA">
+                  {cell(l, 'ICA')}
+                </td>
+                <td class="num" data-label="NCC">
+                  {cell(l, 'NCC')}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -506,22 +856,70 @@ pages.get('/lenders/:username', async (c) => {
     c.status(404);
     return c.html(<NotFound what="This player has not reported any loans as a lender." />);
   }
-  const [exposure, { loans, total }] = await Promise.all([
+  const [exposure, { loans, total }, health] = await Promise.all([
     q.getLenderExposure(c.env.DB, lender.id),
     q.listLoans(c.env.DB, { lender: lender.username, limit: 500, offset: 0 }),
+    q.getSyncHealth(c.env.DB),
   ]);
+  const all = q.combine(exposure);
+  const open = loans.filter(isOpen);
+  const closed = loans.filter((l) => !isOpen(l));
+  const lentTo = new Set(loans.filter((l) => l.status === 'in_progress' || l.status === 'overdue').map((l) => l.borrower.username.toLowerCase()));
+  const outIn = exposure.filter((e) => e.currency !== null && e.currentMinor > 0);
+  const sync = health.find((h) => h.lender.toLowerCase() === lender.username.toLowerCase());
+
+  const headline =
+    all.currentMinor > 0
+      ? `Has ${formatMinor(all.currentMinor)}${outIn.length === 1 ? ` ${outIn[0]!.currency}` : ''} out on loan to ${plural(lentTo.size, 'borrower')}.`
+      : all.loans > 0
+        ? 'Has nothing out on loan at the moment.'
+        : 'No loans on record yet.';
+  const caveats = [
+    all.breachedLoans > 0 && `${plural(all.breachedLoans, 'loan')} in breach.`,
+    all.overdueLoans > 0 && `${plural(all.overdueLoans, 'loan')} overdue.`,
+    all.nonCashLoans > 0 && `${plural(all.nonCashLoans, 'non-cash loan')} not counted in the amounts.`,
+  ].filter(Boolean);
+  const tracking =
+    lender.trackingMode === 'fio' ? 'loans tracked automatically through FIO' : lender.trackingMode === 'api' ? 'loans reported through the API' : 'loans entered by hand';
+
   return c.html(
-    <Layout title={lender.username}>
-      <h1>{lender.username}</h1>
-      <p class="sub">
-        Lender · {lender.trackingMode === 'fio' ? 'loans tracked automatically through FIO' : lender.trackingMode === 'api' ? 'loans reported through the API' : 'loans entered by hand'}
-      </p>
-      <ExposureCards exposure={exposure} role="lent" />
+    <Layout title={lender.username} description={`${lender.username} as a lender: ${headline} ${plural(all.loans, 'loan')} on record.`}>
+      <div class="titlebar">
+        <div>
+          <h1>{lender.username}</h1>
+          <p class="sub">
+            Lender · {tracking} · <a href={borrowerUrl(lender.username)}>as a borrower</a>
+          </p>
+        </div>
+        <CopyLink />
+      </div>
+
+      <Verdict tone={all.breachedLoans > 0 || all.overdueLoans > 0 ? 'warn' : 'neutral'} headline={headline} detail={caveats.length > 0 ? caveats.join(' ') : undefined}>
+        <MoneyStat label="Out on loan now" combinedMinor={all.currentMinor} exposure={exposure} pick={(e) => e.currentMinor} />
+        <MoneyStat label="Lent in total" combinedMinor={all.totalMinor} exposure={exposure} pick={(e) => e.totalMinor} />
+        <Stat label="Borrowers now" value={lentTo.size} />
+        <Stat label="In breach" value={all.breachedLoans} note={`${all.everBreachedLoans} ever · ${all.overdueLoans} overdue`} />
+        <Stat label="Loans" value={(all.loans + all.nonCashLoans).toLocaleString('en-US')} note={`${all.terminatedLoans} terminated, not in totals`} />
+      </Verdict>
+      {sync ? (
+        <p class="fresh">
+          {sync.ok ? 'Last read from FIO' : `FIO sync is failing (${sync.error ?? 'unknown error'}); last tried`}{' '}
+          <time datetime={sync.checkedAt} data-rel>
+            {stamp(sync.checkedAt)}
+          </time>
+          . <a href="/sync">Sync health</a>
+        </p>
+      ) : (
+        <p class="fresh">These loans were entered by hand and are not checked against FIO.</p>
+      )}
+
+      <h2>Open or unresolved ({open.length})</h2>
+      {open.length === 0 ? <p class="muted">Nothing open.</p> : <LoanTable loans={open} hide="lender" />}
       <h2>
-        Loans ({total}
-        {total > loans.length && `, newest ${loans.length} shown`})
+        Closed ({total - open.length}
+        {total > loans.length && `, newest ${closed.length} shown`})
       </h2>
-      <LoanTable loans={loans} hide="lender" />
+      {closed.length === 0 ? <p class="muted">No finished loans yet.</p> : <LoanTable loans={closed} hide="lender" />}
     </Layout>,
   );
 });
