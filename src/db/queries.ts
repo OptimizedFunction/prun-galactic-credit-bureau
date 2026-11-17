@@ -109,12 +109,12 @@ export async function listLoans(db: D1Database, f: LoanFilter): Promise<{ loans:
   if (f.status) (where.push('l.status = ?'), args.push(f.status));
   if (f.currency) (where.push('l.currency = ?'), args.push(f.currency));
   const clause = `WHERE ${where.join(' AND ')}`;
+  // The count only needs the lender and borrower tables when it filters on their names.
+  const joins = `${f.lender ? 'JOIN lenders le ON le.id = l.lender_id ' : ''}${f.borrower ? 'JOIN borrowers b ON b.id = l.borrower_id ' : ''}`;
 
   const [rows, count] = await db.batch<LoanRow | { n: number }>([
     db.prepare(`${LOAN_SELECT} ${clause} ORDER BY l.issued_on DESC, l.id DESC LIMIT ? OFFSET ?`).bind(...args, f.limit, f.offset),
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM loans l JOIN lenders le ON le.id = l.lender_id JOIN borrowers b ON b.id = l.borrower_id ${clause}`)
-      .bind(...args),
+    db.prepare(`SELECT COUNT(*) AS n FROM loans l ${joins}${clause}`).bind(...args),
   ]);
   return {
     loans: (rows!.results as LoanRow[]).map(toLoan),

@@ -1327,11 +1327,11 @@ pages.get('/loans/:id', async (c) => {
             <p>
               This record mirrors the in-game contract, so its status, amount and dates follow the game and cannot be changed by hand. If the contract
               itself is the problem, take it up with <a href={lenderUrl(loan.lender)}>{loan.lender}</a>. Anyone signed in can still add context in the
-              notes, here or <a href={ledgerLink}>in the ledger</a>.
+              notes, here or <a href={ledgerLink} rel="nofollow">in the ledger</a>.
             </p>
           ) : (
             <p>
-              Anyone signed in with Discord can correct this entry <a href={ledgerLink}>in the ledger</a>, whether you are the lender, the borrower or
+              Anyone signed in with Discord can correct this entry <a href={ledgerLink} rel="nofollow">in the ledger</a>, whether you are the lender, the borrower or
               someone who knows better. Every change is listed below under your name and can be undone.
             </p>
           )}

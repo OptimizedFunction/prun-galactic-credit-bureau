@@ -20,6 +20,16 @@ app.use(async (c, next) => {
   c.header('X-Bureau-Version', RELEASE_TAG);
 });
 
+// Crawlers may read the pages, but not every search of the ledger, the API or sign-in: each ledger search used to
+// cost thousands of database reads, and one crawler following them used up the day's free D1 allowance.
+app.get('/robots.txt', (c) =>
+  c.text(
+    ['User-agent: *', 'Disallow: /ledger?', 'Disallow: /api/', 'Disallow: /auth/', 'Disallow: /changes?', 'Disallow: /search', 'Disallow: /my', 'Disallow: /track','Crawl-delay: 10', ''].join('\n'),
+    200,
+    { 'Cache-Control': 'public, max-age=86400' },
+  ),
+);
+
 app.route('/api/v1', api);
 app.route('/auth', auth);
 app.route('/', apiDocs);
