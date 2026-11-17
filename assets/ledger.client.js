@@ -237,6 +237,7 @@
     const tr = table.tHead.rows[0];
     for (const col of COLS) {
       const th = document.createElement('th');
+      th.dataset.f = col.f;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = col.label;
@@ -264,6 +265,48 @@
       list.textContent = '';
       for (const name of names) list.append(new Option(name));
     }
+  }
+
+  // ---- Choosing columns: hidden columns are remembered on this device. ----
+  function columnPicker() {
+    const holder = document.getElementById('ledger-columns');
+    if (!holder) return;
+    let hidden = [];
+    try {
+      hidden = JSON.parse(localStorage.getItem('ledgerHidden') ?? '[]');
+    } catch {
+      // No storage: columns can still be hidden for this visit.
+    }
+    // One rule per column, switched on by a class on the table.
+    const style = document.createElement('style');
+    style.textContent = COLS.map((col) => `#ledger.hide-${col.f} [data-f="${col.f}"] { display: none; }`).join('\n');
+    document.head.append(style);
+    const apply = () => {
+      for (const col of COLS) table.classList.toggle('hide-' + col.f, hidden.includes(col.f));
+      holder.querySelector('summary').textContent = hidden.length ? `Columns (${hidden.length} hidden)` : 'Columns';
+    };
+    const picker = holder.querySelector('.picker');
+    for (const col of COLS) {
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !hidden.includes(col.f);
+      box.addEventListener('change', () => {
+        hidden = box.checked ? hidden.filter((f) => f !== col.f) : [...hidden, col.f];
+        try {
+          localStorage.setItem('ledgerHidden', JSON.stringify(hidden));
+        } catch {
+          // Ignore: see above.
+        }
+        apply();
+      });
+      label.append(box, col.label);
+      picker.append(label);
+    }
+    document.addEventListener('click', (e) => {
+      if (!holder.contains(e.target)) holder.open = false;
+    });
+    apply();
   }
 
   // ---- Saving ----
@@ -308,7 +351,7 @@
 
   // ---- Moving between cells ----
 
-  const isCell = (el) => el && el.tabIndex === 0 && Boolean(el.dataset.f);
+  const isCell = (el) => el && el.tabIndex === 0 && Boolean(el.dataset.f) && el.offsetParent !== null;
 
   /** The next editable cell reading left to right, then down (or the reverse). */
   function nextEditable(td, back) {
@@ -584,6 +627,7 @@
   }
 
   header();
+  columnPicker();
   render();
   fillNames();
   const wanted = new URLSearchParams(location.search).get('q');
