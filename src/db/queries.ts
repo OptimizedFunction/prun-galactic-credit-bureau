@@ -348,10 +348,13 @@ export async function listLenders(db: D1Database): Promise<LenderSummary[]> {
   for (const row of exposure!.results as (ExposureRow & { lender_id: number })[]) {
     byLender.set(row.lender_id, [...(byLender.get(row.lender_id) ?? []), toExposure(row)]);
   }
-  return (lenders!.results as { id: number; username: string; tracking_mode: Lender['trackingMode'] }[]).map((l) => {
-    const exp = byLender.get(l.id) ?? [];
-    return { username: l.username, trackingMode: l.tracking_mode, loans: exp.reduce((n, e) => n + e.loans, 0), exposure: exp };
-  });
+  return (lenders!.results as { id: number; username: string; tracking_mode: Lender['trackingMode'] }[])
+    .map((l) => {
+      const exp = byLender.get(l.id) ?? [];
+      return { username: l.username, trackingMode: l.tracking_mode, loans: exp.reduce((n, e) => n + e.loans, 0), exposure: exp };
+    })
+    // A name whose every loan was deleted (a mistake undone, or abuse rolled back) is not a lender.
+    .filter((l) => l.loans > 0 || l.trackingMode !== 'manual');
 }
 
 export interface LeaderboardEntry {

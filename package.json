@@ -13,10 +13,11 @@
     "sheet:verify": "tsx scripts/verify-import.ts",
     "seed": "npm run db:migrate && npm run sheet:fetch && npm run sheet:import && npm run sheet:verify",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test test/normalize.test.ts test/sync.test.ts test/edits.test.ts test/keys.test.ts test/ratelimit.test.ts",
+    "test": "tsx --test test/normalize.test.ts test/sync.test.ts test/edits.test.ts test/keys.test.ts test/ratelimit.test.ts test/admin.test.ts",
     "dev:cron": "wrangler dev --test-scheduled",
     "db:reset": "node -e \"require('fs').rmSync('.wrangler/state',{recursive:true,force:true})\" && npm run db:migrate",
-    "sync:dry": "tsx scripts/sync-dry-run.ts"
+    "sync:dry": "tsx scripts/sync-dry-run.ts",
+    "db:backup": "wrangler d1 export bureau --remote --output data/bureau-backup.sql"
   },
   "dependencies": {
     "hono": "^4.13.19"

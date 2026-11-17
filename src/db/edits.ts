@@ -502,3 +502,9 @@ export async function reportLoan(db: D1Database, lender: { id: number; username:
   const changed = await updateLoan(db, existing.id, fields, editor);
   return { loanId: existing.id, created: false, changed };
 }
+
+/** A loan's current values in the form revisions store them, plus its trust label and whether it is deleted. */
+export async function currentValues(db: D1Database, id: number): Promise<{ values: Record<string, unknown>; trust: Trust; deleted: boolean }> {
+  const row = await loadRow(db, id);
+  return { values: publicValues(fromRow(row)), trust: row.trust, deleted: row.deleted_at !== null };
+}
