@@ -17,6 +17,11 @@ const LEDGER_CSS = `
 .phone-only { display: none; }
 @media (max-width: 760px) { .phone-only { display: block; margin: 0 0 12px; } .desk-only { display: none; } .ledger-scroll { max-height: none; } #ledger td { padding: 3px 12px; } }
 #ledger-msg { min-height: 1.5em; font-weight: 600; }
+#ledger-toast { position: fixed; z-index: 30; display: flex; align-items: center; gap: 12px; max-width: min(460px, calc(100vw - 16px)); padding: 8px 12px; color: var(--bg); background: var(--text); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); font-size: 14px; }
+#ledger-toast[hidden] { display: none; }
+#ledger-toast.err { color: #fff; background: #b3261e; }
+#ledger-toast button { flex: none; padding: 3px 10px; color: inherit; background: none; border: 1px solid currentColor; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
+#ledger td[tabindex]:focus { background: color-mix(in srgb, var(--link) 12%, transparent); }
 #ledger-msg.ok { color: var(--good); } #ledger-msg.err { color: var(--bad); }
 #ledger th { position: sticky; top: 0; background: var(--panel); z-index: 1; padding: 0; }
 #ledger th button { width: 100%; padding: 8px 12px; font: inherit; font-weight: 600; font-size: 13px; color: var(--muted); background: none; border: 0; text-align: inherit; cursor: pointer; }
@@ -44,13 +49,17 @@ details.panel[open] summary { margin-bottom: 12px; }
 
 ledgerPages.get('/ledger.js', (c) => c.body(ledgerScript, 200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' }));
 
+/** Loans sent with the page itself. The browser fetches older ones in the background, so the page opens quickly. */
+const FIRST_ROWS = 200;
+
 ledgerPages.get('/ledger', async (c) => {
   // Taken before the query, so the first background refresh picks up anything written while the page was loading.
   const cursor = new Date().toISOString();
-  const [user, { loans }] = await Promise.all([currentUser(c), q.listLoans(c.env.DB, { limit: 100_000, offset: 0 })]);
+  const [user, { loans, total }] = await Promise.all([currentUser(c), q.listLoans(c.env.DB, { limit: FIRST_ROWS, offset: 0 })]);
   const data = {
     user,
     cursor,
+    total,
     loans: loans.map((l) => ({
       id: l.id,
       lender: l.lender,
@@ -89,7 +98,7 @@ ledgerPages.get('/ledger', async (c) => {
         )}
       </p>
       <p class="hint">
-        {user && <>Enter saves, Esc cancels, Tab moves to the next cell. </>}
+        {user && <>Enter saves, Esc cancels, Tab moves to the next cell; arrow keys move between cells. </>}
         Loans with Auto track ticked follow FIO, so only their notes can be edited. Trust is assigned by the bureau (see{' '}
         <a href="/about">About</a>). Other people's changes appear within half a minute.
       </p>
@@ -99,11 +108,11 @@ ledgerPages.get('/ledger', async (c) => {
           <form class="add" id="ledger-add">
             <label>
               Lender
-              <input name="lender" required maxlength={64} />
+              <input name="lender" required maxlength={64} list="names-lender" autocomplete="off" />
             </label>
             <label>
               Borrower
-              <input name="borrower" required maxlength={64} />
+              <input name="borrower" required maxlength={64} list="names-borrower" autocomplete="off" />
             </label>
             <label>
               CO
@@ -156,6 +165,9 @@ ledgerPages.get('/ledger', async (c) => {
         </details>
       )}
       {user && <p class="hint phone-only">Editing is switched off on small screens, so a stray tap cannot change a loan. Use a wider screen to edit.</p>}
+      <datalist id="names-lender"></datalist>
+      <datalist id="names-borrower"></datalist>
+      <div id="ledger-toast" role="status" aria-live="polite" hidden></div>
       <div class="toolbar">
         <input type="search" id="ledger-filter" placeholder="Filter: any text, e.g. a username, contract ID or status" aria-label="Filter loans" />
         <span id="ledger-count" class="muted"></span>
