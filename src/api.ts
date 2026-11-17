@@ -6,6 +6,7 @@ import * as edits from './db/edits';
 import * as lenderKeys from './db/lenderKeys';
 import * as q from './db/queries';
 import { isCurrency, isStatus, normalizeContractId } from './lib/normalize';
+import { CONNECT_LIMIT, MemoryBuckets, READ_LIMIT, takeFromDb, WRITE_LIMIT, type BucketSpec, type Take } from './lib/rateLimit';
 import { seal } from './lib/secretbox';
 import { fetchKeyOwner, fetchLoanContracts, fetchUser } from './sync/fio';
 import { extractLoan } from './sync/plan';
@@ -16,22 +17,44 @@ export const api = new Hono<{ Bindings: Env }>();
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 415 | 502 | 503,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 415 | 429 | 502 | 503,
     readonly code: string,
     message: string,
+    /** Extra response headers, e.g. Retry-After. */
+    readonly headers: Record<string, string> = {},
   ) {
     super(message);
   }
 }
 
+const tooMany = (take: Take, spec: BucketSpec, what: string): ApiError =>
+  new ApiError(429, 'rate_limited', `Too many ${what}. Try again in ${take.retryAfterSeconds} second${take.retryAfterSeconds === 1 ? '' : 's'}.`, {
+    'Retry-After': String(take.retryAfterSeconds),
+    'RateLimit-Limit': String(spec.capacity),
+    'RateLimit-Remaining': '0',
+  });
+
 /** Integer "minor" fields are internal; the API exposes decimal strings only. */
-const json = (data: unknown, status = 200): Response =>
+const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(data, (key, value) => (key.endsWith('Minor') ? undefined : value)), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 'content-type': 'application/json; charset=utf-8', ...headers },
   });
 
 api.use('*', cors({ origin: '*', allowMethods: ['GET', 'HEAD', 'OPTIONS'] }));
+
+// Every request draws on a token bucket for its client address (see lib/rateLimit.ts). Writes draw on a
+// second, exact bucket per user or lender key, in editor() and lenderFromKey().
+const addressBuckets = new MemoryBuckets();
+
+api.use('*', async (c, next) => {
+  const address = c.req.header('CF-Connecting-IP') ?? 'local';
+  const take = addressBuckets.take(address, READ_LIMIT);
+  if (!take.allowed) throw tooMany(take, READ_LIMIT, 'requests');
+  await next();
+  c.header('RateLimit-Limit', String(READ_LIMIT.capacity));
+  c.header('RateLimit-Remaining', String(take.remaining));
+});
 
 api.use('*', async (c, next) => {
   await next();
@@ -39,7 +62,7 @@ api.use('*', async (c, next) => {
 });
 
 api.onError((err, c) => {
-  if (err instanceof ApiError) return json({ error: { code: err.code, message: err.message } }, err.status);
+  if (err instanceof ApiError) return json({ error: { code: err.code, message: err.message } }, err.status, err.headers);
   if (err instanceof edits.EditError) {
     const status = err.kind === 'invalid' ? 400 : err.kind === 'not_found' ? 404 : 409;
     return json({ error: { code: err.kind === 'invalid' ? 'bad_request' : err.kind, message: err.message } }, status);
@@ -187,6 +210,11 @@ async function editor(c: Ctx): Promise<SessionUser> {
   if (origin && origin !== new URL(c.req.url).origin) throw new ApiError(403, 'forbidden', 'Edits must come from this site.');
   const user = await currentUser(c);
   if (!user) throw new ApiError(401, 'unauthorized', 'Sign in with Discord first.');
+  // Reading your own connected lenders is not a write.
+  if (c.req.method !== 'GET') {
+    const take = await takeFromDb(c.env.DB, `user:${user.id}`, WRITE_LIMIT);
+    if (!take.allowed) throw tooMany(take, WRITE_LIMIT, 'changes');
+  }
   return user;
 }
 
@@ -278,6 +306,9 @@ api.post('/fio-keys', async (c) => {
   const user = await editor(c);
   const secret = c.env.FIO_KEY_SECRET;
   if (!secret) throw new ApiError(503, 'unavailable', 'Connecting a FIO key is not set up on this server.');
+  // Each attempt calls out to FIO, so it has its own, tighter bucket.
+  const attempt = await takeFromDb(c.env.DB, `connect:${user.id}`, CONNECT_LIMIT);
+  if (!attempt.allowed) throw tooMany(attempt, CONNECT_LIMIT, 'attempts to connect a key');
   const body = await jsonBody(c);
   const apiKey = typeof body['apiKey'] === 'string' ? body['apiKey'].trim() : '';
   if (apiKey.length < 8 || apiKey.length > 200 || /\s/.test(apiKey)) throw new ApiError(400, 'bad_request', 'That does not look like a FIO API key.');

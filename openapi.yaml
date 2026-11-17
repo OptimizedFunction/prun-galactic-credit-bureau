@@ -10,6 +10,12 @@ info:
 
     **Reading needs no key.** Responses are cached for 60 seconds.
 
+    **Rate limits** work as token buckets: a bucket holds a burst allowance and refills steadily.
+    Every request draws on a bucket for its client address (bursts of 120, refilling 2 a second).
+    Writes also draw on a bucket for the signed-in user or lender key (bursts of 60, refilling 1 a second).
+    Responses carry `RateLimit-Limit` and `RateLimit-Remaining`. When a bucket is empty the answer is
+    429 with `Retry-After` in seconds.
+
     **Editing** needs a Discord sign-in (a session cookie set by `/auth/login`) and must come from this site.
     Any signed-in user may edit any loan. Every change is recorded with who made it; see `/changes`.
     Loans with `autoTrack` on follow FIO: only `notes` and `autoTrack` can be changed on them, and they cannot be deleted.
@@ -970,5 +976,5 @@ components:
           type: object
           required: [code, message]
           properties:
-            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, ambiguous, fio_unreachable, unavailable, internal_error] }
+            code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, ambiguous, rate_limited, fio_unreachable, unavailable, internal_error] }
             message: { type: string }

@@ -5,6 +5,7 @@ import { ledgerPages } from './ledger';
 import { mePages } from './me';
 import { trackPages } from './track';
 import { notFoundPage, pages } from './pages';
+import { pruneBuckets } from './lib/rateLimit';
 import { runSync } from './sync/run';
 import type { Env } from './env';
 
@@ -27,8 +28,9 @@ app.notFound((c) => {
 export default {
   fetch: app.fetch,
 
-  /** Cron trigger (see wrangler.jsonc): pull every tracked lender's loans from FIO. */
+  /** Cron trigger (see wrangler.jsonc): housekeeping, then pull every tracked lender's loans from FIO. */
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    await pruneBuckets(env.DB).catch((err) => console.error('Pruning rate-limit buckets failed', err));
     if (!env.FIO_API_KEY && !env.FIO_KEY_SECRET) {
       console.warn('FIO sync skipped: neither FIO_API_KEY nor FIO_KEY_SECRET is set.');
       return;
